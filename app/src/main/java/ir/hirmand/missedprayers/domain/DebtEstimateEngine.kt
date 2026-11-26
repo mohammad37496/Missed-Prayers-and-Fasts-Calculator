@@ -75,6 +75,7 @@ object DebtEstimateEngine {
                 DayDecision.NOT_OBLIGATORY -> Unit
                 DayDecision.NEEDS_REVIEW -> { fastingDays++; fastingReview++; fastingByYear[date.year] = (fastingByYear[date.year] ?: 0) + 1 }
             }
+            if (date == endInclusive) break
             date = date.plusDays(1)
         }
         val prayerCount = prayerDays.coerceAtMost(Int.MAX_VALUE)

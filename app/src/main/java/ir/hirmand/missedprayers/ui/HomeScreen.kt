@@ -5,9 +5,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +26,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
@@ -43,6 +48,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -63,8 +69,11 @@ fun HomeScreen(viewModel: DebtViewModel) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val profile by viewModel.profile.collectAsState()
-    fun hasNotificationPermission(): Boolean = Build.VERSION.SDK_INT < 33 ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    fun hasNotificationPermission(): Boolean {
+        val runtimePermissionGranted = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        return runtimePermissionGranted && NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
     var notificationPermissionGranted by remember { mutableStateOf(hasNotificationPermission()) }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -150,24 +159,43 @@ fun HomeScreen(viewModel: DebtViewModel) {
                 error = error
             )
         } else {
-            Scaffold(bottomBar = {
-                NavigationBar {
-                    listOf("dashboard" to "خانه", "calendar" to "تقویم", "planner" to "برنامه", "reports" to "گزارش", "more" to "بیشتر").forEach { (tab, label) ->
-                        NavigationBarItem(selected = selectedTab == tab, onClick = { selectedTab = tab }, icon = { Text(when (tab) { "dashboard" -> "⌂"; "calendar" -> "▦"; "planner" -> "◷"; "reports" -> "▤"; else -> "⋯" }) }, label = { Text(label) })
-                    }
-                }
-            }) { padding ->
-                Column(Modifier.fillMaxSize().padding(padding)) {
-                    error?.let { message ->
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(message, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                            OutlinedButton(onClick = { error = null }) { Text("بستن") }
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val expandedLayout = maxWidth >= 600.dp
+                val destinations = listOf("dashboard" to "خانه", "calendar" to "تقویم", "planner" to "برنامه", "reports" to "گزارش", "more" to "بیشتر")
+                Scaffold(bottomBar = {
+                    if (!expandedLayout) NavigationBar {
+                        destinations.forEach { (tab, label) ->
+                            NavigationBarItem(selected = selectedTab == tab, onClick = { selectedTab = tab }, icon = { Text(when (tab) { "dashboard" -> "⌂"; "calendar" -> "▦"; "planner" -> "◷"; "reports" -> "▤"; else -> "⋯" }) }, label = { Text(label) })
                         }
                     }
-                    androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
-                    when (selectedTab) {
+                }) { padding ->
+                    Row(Modifier.fillMaxSize().padding(padding)) {
+                        if (expandedLayout) NavigationRail {
+                            destinations.forEach { (tab, label) ->
+                                NavigationRailItem(
+                                    selected = selectedTab == tab,
+                                    onClick = { selectedTab = tab },
+                                    icon = { Text(when (tab) { "dashboard" -> "⌂"; "calendar" -> "▦"; "planner" -> "◷"; "reports" -> "▤"; else -> "⋯" }) },
+                                    label = { Text(label) },
+                                    alwaysShowLabel = true
+                                )
+                            }
+                        }
+                        Column(Modifier.weight(1f).fillMaxHeight()) {
+                            error?.let { message ->
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(message, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                    OutlinedButton(onClick = { error = null }) { Text("بستن") }
+                                }
+                            }
+                            androidx.compose.foundation.layout.Box(
+                                Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.TopCenter
+                            ) {
+                                Column(Modifier.widthIn(max = 900.dp).fillMaxSize()) {
+                                    when (selectedTab) {
                         "calendar" -> CalendarScreen(profile)
-                        "planner" -> PlannerScreen(plannerSettings, prayers.map { it.prayerType to (it.total - it.completed).coerceAtLeast(0) }, ((fasting?.total ?: 0) - (fasting?.completed ?: 0)).coerceAtLeast(0), profile?.timezoneId, notificationPermissionGranted, onOpenNotificationSettings = {
+                        "planner" -> PlannerScreen(plannerSettings, prayers.map { it.prayerType to (it.total - it.completed).coerceAtLeast(0) }, ((fasting?.total ?: 0) - (fasting?.completed ?: 0)).coerceAtLeast(0), profile?.timezoneId, profile?.calendarPreference, notificationPermissionGranted, onOpenNotificationSettings = {
                             context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName))
                         }) { settings ->
                             viewModel.savePlannerSettings(settings) { error = it }
@@ -175,11 +203,12 @@ fun HomeScreen(viewModel: DebtViewModel) {
                                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                         }
-                        "reports" -> ReportsScreen(prayers, fasting, viewModel.allRecords.collectAsState().value)
+                        "reports" -> ReportsScreen(prayers, fasting, viewModel.allRecords.collectAsState().value, profile?.calendarPreference ?: "PERSIAN")
                         "more" -> MoreScreen(onProfile = { selectedTab = "profile" }, onFiqh = { selectedTab = "settings" }, onBackup = { selectedTab = "backup" }, onHelp = { selectedTab = "help" })
                         "help" -> HelpScreen()
                         "profile" -> ProfileScreen(profile, periods, { value -> viewModel.saveProfile(value) { error = it } },
-                            { kind, start, end, note -> viewModel.addExcusePeriod(kind, start, end, note) { error = it } }, viewModel::deleteExcusePeriod,
+                            { kind, start, end, note -> viewModel.addExcusePeriod(kind, start, end, note) },
+                            { id -> viewModel.deleteExcusePeriod(id) { error = it } },
                             { prayerDays, fastingDays -> viewModel.applyRawDateEstimate(prayerDays, fastingDays) { error = it }; selectedTab = "dashboard" })
                         "settings" -> SettingsScreen(fiqhPreferences, { viewModel.saveFiqhPreferences(it) { error = it } }) {
                             viewModel.deleteAllData { result ->
@@ -196,14 +225,17 @@ fun HomeScreen(viewModel: DebtViewModel) {
                                     .onFailure { backupStatus = "ساخت نسخه پشتیبان ناموفق بود: ${it.message}" }
                             } },
                             onRestore = { password -> pendingImportPassword = password.toCharArray(); importBackupLauncher.launch(arrayOf("application/vnd.hirmand.mwbk", "application/octet-stream", "*/*")) })
-                        else -> Dashboard(prayers, fasting, onRecordPrayer = viewModel::recordPrayer,
+                        else -> Dashboard(prayers, fasting, onRecordPrayer = { type, amount -> viewModel.recordPrayer(type, amount) { error = it } },
                             recentRecords = recentRecords,
                             dailyVerse = dailyVerse,
-                            onRecordFasting = viewModel::recordFasting,
+                            onRecordFasting = { amount -> viewModel.recordFasting(amount) { error = it } },
                             onRefreshVerse = viewModel::refreshDailyVerse,
                             onUndoRecord = { id -> viewModel.undoRecord(id) { error = it } },
                             onEdit = { showSetup = true })
                     }
+                                }
+                            }
+                        }
                 }
                 }
             }
@@ -277,13 +309,14 @@ private fun Dashboard(
 ) {
     val prayerRemaining = prayers.sumOf { (it.total - it.completed).coerceAtLeast(0).toLong() }
     val fastRemaining = ((fasting?.total ?: 0) - (fasting?.completed ?: 0)).coerceAtLeast(0)
+    val hasDebt = prayers.isNotEmpty() || fasting != null
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Text("السلام علیک", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
             Text("قدم‌به‌قدم تا آرامش", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Text("پیشرفت عبادات قضاشده", style = MaterialTheme.typography.bodyMedium)
         }
-        item {
+        if (hasDebt) item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary), shape = RoundedCornerShape(24.dp)) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("مجموع نمازهای باقی‌مانده", color = androidx.compose.ui.graphics.Color.White)
@@ -292,12 +325,22 @@ private fun Dashboard(
                 }
             }
         }
-        item { Text("پیگیری نمازها", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        items(prayers, key = { it.prayerType }) { debt ->
-            val type = PrayerType.valueOf(debt.prayerType)
-            DebtCard(title = "نماز ${type.title}", total = debt.total, completed = debt.completed, onRecord = { amount -> onRecordPrayer(type, amount) })
+        if (!hasDebt) item {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("هنوز برآوردی ثبت نشده است", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("برای شروع، تعداد تقریبی نمازها و روزه‌های قضا را وارد کنید. می‌توانید بعداً آن‌ها را بدون حذف تاریخچه اصلاح کنید.")
+                    Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) { Text("ثبت برآورد اولیه") }
+                }
+            }
+        } else {
+            item { Text("پیگیری نمازها", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            items(prayers, key = { it.prayerType }) { debt ->
+                val type = PrayerType.valueOf(debt.prayerType)
+                DebtCard(title = "نماز ${type.title}", total = debt.total, completed = debt.completed, onRecord = { amount -> onRecordPrayer(type, amount) })
+            }
+            if (fasting != null) item { DebtCard("روزه قضا", fasting.total, fasting.completed, onRecordFasting) }
         }
-        if (fasting != null) item { DebtCard("روزه قضا", fasting.total, fasting.completed, onRecordFasting) }
         if (recentRecords.isNotEmpty()) {
             item { Text("آخرین ثبت‌ها", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             items(recentRecords, key = { it.id }) { record ->

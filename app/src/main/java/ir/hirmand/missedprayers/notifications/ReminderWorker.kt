@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -35,7 +36,8 @@ class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWork
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "یادآور عبادات", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "یادآوری برنامه شخصی جبران"
         })
-        val permitted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val runtimePermissionGranted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val permitted = runtimePermissionGranted && NotificationManagerCompat.from(applicationContext).areNotificationsEnabled()
         if (permitted) {
             val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)

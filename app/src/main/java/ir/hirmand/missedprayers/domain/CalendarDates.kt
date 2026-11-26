@@ -25,11 +25,34 @@ object CalendarDates {
 
     fun fromIslamicCivil(date: CalendarDate): LocalDate = toGregorian(Calendar.getInstance(utc, ULocale("en@calendar=islamic-civil")), date)
 
+    fun toPreferred(date: LocalDate, preference: String): CalendarDate = when (preference) {
+        "PERSIAN" -> toPersian(date)
+        "ISLAMIC_CIVIL" -> toIslamicCivil(date)
+        "GREGORIAN" -> CalendarDate(date.year, date.monthValue, date.dayOfMonth)
+        else -> throw IllegalArgumentException("تقویم پیش‌فرض پشتیبانی نمی‌شود")
+    }
+
+    fun fromPreferred(date: CalendarDate, preference: String): LocalDate = when (preference) {
+        "PERSIAN" -> fromPersian(date)
+        "ISLAMIC_CIVIL" -> fromIslamicCivil(date)
+        "GREGORIAN" -> LocalDate.of(date.year, date.month, date.day)
+        else -> throw IllegalArgumentException("تقویم پیش‌فرض پشتیبانی نمی‌شود")
+    }
+
     fun today(zoneId: String = ZoneId.systemDefault().id): LocalDate = Instant.now().atZone(ZoneId.of(zoneId)).toLocalDate()
 
     fun display(date: LocalDate, locale: Locale = Locale.forLanguageTag("fa-IR")): String {
         val p = toPersian(date)
         return "%04d/%02d/%02d".format(locale, p.year, p.month, p.day)
+    }
+
+    fun displayPreferred(
+        date: LocalDate,
+        preference: String,
+        locale: Locale = Locale.forLanguageTag("fa-IR")
+    ): String {
+        val preferred = toPreferred(date, preference)
+        return "%04d/%02d/%02d".format(locale, preferred.year, preferred.month, preferred.day)
     }
 
     private fun fromIcu(calendar: Calendar, date: LocalDate): CalendarDate {

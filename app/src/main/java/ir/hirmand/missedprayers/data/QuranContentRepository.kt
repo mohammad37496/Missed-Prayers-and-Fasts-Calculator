@@ -9,7 +9,13 @@ import java.net.URL
 import java.net.URI
 import java.time.LocalDate
 
-data class DailyVerseResult(val verse: DailyVerseEntity?, val fromCache: Boolean, val message: String?, val loading: Boolean = false)
+data class DailyVerseResult(
+    val verse: DailyVerseEntity?,
+    val fromCache: Boolean,
+    val message: String?,
+    val loading: Boolean = false,
+    val stale: Boolean = false
+)
 
 data class RecitationAudio(val url: String, val reciterName: String, val source: String)
 
@@ -76,7 +82,12 @@ class QuranContentRepository(
             DailyVerseResult(verse, false, null)
         } catch (error: Exception) {
             val cached = dao.getLatestDailyVerse()
-            DailyVerseResult(cached, cached != null, error.message ?: "دریافت محتوای روز ممکن نشد")
+            DailyVerseResult(
+                cached,
+                cached != null,
+                error.message ?: "دریافت محتوای روز ممکن نشد",
+                stale = cached != null && cached.dayKey != key
+            )
         }
     }
 

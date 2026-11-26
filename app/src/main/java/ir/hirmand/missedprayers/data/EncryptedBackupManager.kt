@@ -40,7 +40,7 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             PrayerDebtEntity(type, total, completed, item.getLong("updatedAt"))
         }
         require(prayers.map { it.prayerType }.distinct().size == prayers.size && prayers.size <= 5)
-        val fastingObject = root.optJSONObject("fasting")
+        val fastingObject = root.optionalObject("fasting")
         val fasting = fastingObject?.let {
             val total = it.getInt("total"); val completed = it.getInt("completed")
             require(total >= 0 && completed in 0..total)
@@ -62,7 +62,7 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             DebtRecordEntity(id, kind, reference, amount, item.getLong("createdAt"), before, after)
         }
         require(records.size <= 100_000 && records.map { it.id }.distinct().size == records.size)
-        val profile = root.optJSONObject("profile")?.let {
+        val profile = root.optionalObject("profile")?.let {
             val start = it.optNullableString("taklifStartDate")?.let(LocalDate::parse)
             val end = it.optNullableString("taklifEndDate")?.let(LocalDate::parse)
             require(start == null || end == null || !end.isBefore(start))
@@ -80,13 +80,13 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             ExcusePeriodEntity(item.getLong("id"), kind, start.toString(), end.toString(), item.optNullableString("note"), item.getLong("createdAt"))
         }
         require(periods.size <= 10_000 && periods.map { it.id }.distinct().size == periods.size)
-        val planner = root.optJSONObject("planner")?.let {
+        val planner = root.optionalObject("planner")?.let {
             val target = it.getInt("dailyPrayerTarget"); val fastTarget = it.getInt("dailyFastingTarget"); val mask = it.getInt("activeWeekdaysMask")
             val hour = it.getInt("reminderHour"); val minute = it.getInt("reminderMinute")
             require(target in 1..100 && fastTarget in 1..30 && mask in 1..127 && hour in 0..23 && minute in 0..59)
             PlannerSettingsEntity(dailyPrayerTarget = target, dailyFastingTarget = fastTarget, activeWeekdaysMask = mask, reminderEnabled = it.getBoolean("reminderEnabled"), reminderHour = hour, reminderMinute = minute, updatedAt = it.getLong("updatedAt"))
         }
-        val fiqh = root.optJSONObject("fiqh")?.let {
+        val fiqh = root.optionalObject("fiqh")?.let {
             val url = it.optNullableString("acceptedSourceUrl")
             require(url == null || url.startsWith("https://"))
             val marja = it.optNullableString("marjaId")
@@ -121,6 +121,13 @@ class EncryptedBackupManager(private val database: AppDatabase) {
     private fun <T> JSONArray.toEntities(mapper: (JSONObject) -> T): List<T> {
         require(length() <= 100_000) { "تعداد رکوردهای فایل پشتیبان بیش از حد مجاز است" }
         return (0 until length()).map { mapper(getJSONObject(it)) }
+    }
+
+    private fun JSONObject.optionalObject(key: String): JSONObject? {
+        require(has(key)) { "فیلد $key در فایل پشتیبان وجود ندارد" }
+        val value = opt(key)
+        require(value == JSONObject.NULL || value is JSONObject) { "نوع فیلد $key در فایل پشتیبان معتبر نیست" }
+        return value as? JSONObject
     }
 
     private fun JSONObject.optNullableString(key: String): String? = if (!has(key) || isNull(key)) null else getString(key)

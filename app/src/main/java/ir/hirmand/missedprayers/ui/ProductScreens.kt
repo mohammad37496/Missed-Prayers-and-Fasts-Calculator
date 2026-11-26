@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -37,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -76,30 +79,56 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.launch
+
+private fun calendarLabel(preference: String): String = when (preference) {
+    "PERSIAN" -> "شمسی"
+    "ISLAMIC_CIVIL" -> "قمری محاسباتی"
+    else -> "میلادی"
+}
+
+private fun parseCalendarInput(value: String, preference: String): LocalDate {
+    val parts = value.trim().split(Regex("[-/]"))
+    require(parts.size == 3)
+    return CalendarDates.fromPreferred(CalendarDate(parts[0].toInt(), parts[1].toInt(), parts[2].toInt()), preference)
+}
+
+private fun formatCalendarInput(date: LocalDate, preference: String): String {
+    val value = CalendarDates.toPreferred(date, preference)
+    return "%04d-%02d-%02d".format(Locale.ROOT, value.year, value.month, value.day)
+}
+
+private fun reformatCalendarInput(value: String, from: String, to: String): String =
+    if (value.isBlank()) "" else runCatching { formatCalendarInput(parseCalendarInput(value, from), to) }.getOrDefault(value)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
     profile: UserProfileEntity?, periods: List<ExcusePeriodEntity>,
     onSave: (UserProfileEntity) -> Unit,
-    onAddPeriod: (String, LocalDate, LocalDate, String?) -> Unit,
+    onAddPeriod: suspend (String, LocalDate, LocalDate, String?) -> Unit,
     onDeletePeriod: (Long) -> Unit,
     onApplyEstimate: (Int, Int) -> Unit
 ) {
     var name by remember(profile) { mutableStateOf(profile?.displayName.orEmpty()) }
     var gender by remember(profile) { mutableStateOf(profile?.gender ?: "UNSPECIFIED") }
-    var start by remember(profile) { mutableStateOf(profile?.taklifStartDate.orEmpty()) }
-    var end by remember(profile) { mutableStateOf(profile?.taklifEndDate.orEmpty()) }
     var calendar by remember(profile) { mutableStateOf(profile?.calendarPreference ?: "PERSIAN") }
+    var start by remember(profile) {
+        mutableStateOf(profile?.let { saved -> saved.taklifStartDate?.let { raw -> runCatching { formatCalendarInput(LocalDate.parse(raw), saved.calendarPreference) }.getOrDefault(raw) } }.orEmpty())
+    }
+    var end by remember(profile) {
+        mutableStateOf(profile?.let { saved -> saved.taklifEndDate?.let { raw -> runCatching { formatCalendarInput(LocalDate.parse(raw), saved.calendarPreference) }.getOrDefault(raw) } }.orEmpty())
+    }
     var timezoneId by remember(profile) { mutableStateOf(profile?.timezoneId ?: ZoneId.systemDefault().id) }
     var periodKind by remember { mutableStateOf("MENSTRUATION") }
     var periodStart by remember { mutableStateOf("") }
     var periodEnd by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val estimatePreview = runCatching {
         if (start.isBlank()) null else {
-            val from = LocalDate.parse(start)
-            val to = end.takeIf(String::isNotBlank)?.let(LocalDate::parse) ?: CalendarDates.today(timezoneId)
+            val from = parseCalendarInput(start, calendar)
+            val to = end.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar) } ?: CalendarDates.today(timezoneId)
             DebtEstimateEngine.estimate(from, to, FiqhEvaluationContext(
                 gender,
                 periods.map { RecordedPeriod(it.kind, LocalDate.parse(it.startDate), LocalDate.parse(it.endDate)) }
@@ -123,24 +152,30 @@ fun ProfileScreen(
                 }
             }
         }
-        item { OutlinedTextField(start, { start = it }, label = { Text("شروع بازه برآورد (میلادی YYYY-MM-DD)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
-        item { OutlinedTextField(end, { end = it }, label = { Text("پایان بازه برآورد (اختیاری، YYYY-MM-DD)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { OutlinedTextField(start, { start = it }, label = { Text("شروع بازه برآورد (${calendarLabel(calendar)} YYYY-MM-DD)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { OutlinedTextField(end, { end = it }, label = { Text("پایان بازه برآورد اختیاری (${calendarLabel(calendar)} YYYY-MM-DD)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(timezoneId, { timezoneId = it.take(80) }, label = { Text("منطقه زمانی IANA (مثلاً Asia/Tehran)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { Text("تقویم پیش‌فرض") }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("PERSIAN" to "شمسی", "ISLAMIC_CIVIL" to "قمری محاسباتی", "GREGORIAN" to "میلادی").forEach { (value, label) ->
-                    OutlinedButton(onClick = { calendar = value }) { Text(if (calendar == value) "✓ $label" else label) }
+                    OutlinedButton(onClick = {
+                        start = reformatCalendarInput(start, calendar, value)
+                        end = reformatCalendarInput(end, calendar, value)
+                        periodStart = reformatCalendarInput(periodStart, calendar, value)
+                        periodEnd = reformatCalendarInput(periodEnd, calendar, value)
+                        calendar = value
+                    }) { Text(if (calendar == value) "✓ $label" else label) }
                 }
             }
         }
         item {
             Button(onClick = {
                 runCatching {
-                    start.takeIf(String::isNotBlank)?.let(LocalDate::parse)
-                    end.takeIf(String::isNotBlank)?.let(LocalDate::parse)
+                    val startIso = start.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }
+                    val endIso = end.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }
                     ZoneId.of(timezoneId)
-                    onSave(UserProfileEntity(displayName = name.ifBlank { null }, gender = gender, taklifStartDate = start.ifBlank { null }, taklifEndDate = end.ifBlank { null }, timezoneId = timezoneId, calendarPreference = calendar, marjaId = profile?.marjaId, updatedAt = System.currentTimeMillis()))
+                    onSave(UserProfileEntity(displayName = name.ifBlank { null }, gender = gender, taklifStartDate = startIso, taklifEndDate = endIso, timezoneId = timezoneId, calendarPreference = calendar, marjaId = profile?.marjaId, updatedAt = System.currentTimeMillis()))
                     error = null
                 }.onFailure { error = "تاریخ را با قالب YYYY-MM-DD و به‌صورت معتبر وارد کنید." }
             }, modifier = Modifier.fillMaxWidth()) { Text("ذخیره پروفایل") }
@@ -154,7 +189,7 @@ fun ProfileScreen(
                     Text("روزه به تفکیک سال میلادی: ${estimatePreview.fastingDaysByGregorianYear.entries.joinToString(" · ") { "${it.key}: ${it.value}" }}", style = MaterialTheme.typography.bodySmall)
                     Text("روزهای نیازمند بررسی فقهی: نماز ${estimatePreview.prayerDaysNeedingReview} روز · روزه ${estimatePreview.fastingDaysNeedingReview} روز. روزهای عذر، تفاوت تکلیف روزه و قواعد مرجع هنوز اعمال نشده‌اند؛ هیچ حکم شرعی از این برآورد نتیجه نمی‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     Button(onClick = {
-                        onSave(UserProfileEntity(displayName = name.ifBlank { null }, gender = gender, taklifStartDate = start.ifBlank { null }, taklifEndDate = end.ifBlank { null }, timezoneId = timezoneId, calendarPreference = calendar, marjaId = profile?.marjaId, updatedAt = System.currentTimeMillis()))
+                        onSave(UserProfileEntity(displayName = name.ifBlank { null }, gender = gender, taklifStartDate = start.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }, taklifEndDate = end.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }, timezoneId = timezoneId, calendarPreference = calendar, marjaId = profile?.marjaId, updatedAt = System.currentTimeMillis()))
                         onApplyEstimate(rawPrayerEstimate, rawFastingEstimate)
                     }, modifier = Modifier.fillMaxWidth()) { Text("اعمال برآورد خام و حفظ سوابق") }
                 }
@@ -174,8 +209,14 @@ fun ProfileScreen(
                     OutlinedTextField(periodStart, { periodStart = it }, label = { Text("شروع YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(periodEnd, { periodEnd = it }, label = { Text("پایان YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
                     Button(onClick = {
-                        runCatching { onAddPeriod(periodKind, LocalDate.parse(periodStart), LocalDate.parse(periodEnd), null); periodStart = ""; periodEnd = "" }
-                            .onFailure { error = "بازه تاریخ معتبر نیست یا پایان قبل از شروع است." }
+                        val parsed = runCatching { parseCalendarInput(periodStart, calendar) to parseCalendarInput(periodEnd, calendar) }
+                        parsed.onSuccess { (startDate, endDate) ->
+                            scope.launch {
+                                runCatching { onAddPeriod(periodKind, startDate, endDate, null) }
+                                    .onSuccess { periodStart = ""; periodEnd = ""; error = null }
+                                    .onFailure { error = it.message ?: "ثبت بازه انجام نشد؛ اطلاعات واردشده حفظ شده است." }
+                            }
+                        }.onFailure { error = "بازه تاریخ ${calendarLabel(calendar)} معتبر نیست یا پایان قبل از شروع است." }
                     }, modifier = Modifier.fillMaxWidth()) { Text("ثبت بازه") }
                 }
             }
@@ -186,7 +227,10 @@ fun ProfileScreen(
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
                         Text(periodKindLabel(period.kind), fontWeight = FontWeight.SemiBold)
-                        Text("${period.startDate} تا ${period.endDate}", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "${runCatching { formatCalendarInput(LocalDate.parse(period.startDate), calendar) }.getOrDefault(period.startDate)} تا ${runCatching { formatCalendarInput(LocalDate.parse(period.endDate), calendar) }.getOrDefault(period.endDate)}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                     OutlinedButton(onClick = { onDeletePeriod(period.id) }) { Text("حذف") }
                 }
@@ -201,6 +245,7 @@ fun PlannerScreen(
     prayers: List<Pair<String, Int>>,
     fastingRemaining: Int,
     timezoneId: String?,
+    calendarPreference: String?,
     notificationPermissionGranted: Boolean,
     onOpenNotificationSettings: () -> Unit,
     onSave: (PlannerSettingsEntity) -> Unit
@@ -222,22 +267,30 @@ fun PlannerScreen(
         item {
             Column {
                 listOf("دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه").forEachIndexed { index, label ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = mask and (1 shl index) != 0, onCheckedChange = { checked -> mask = if (checked) mask or (1 shl index) else mask and (1 shl index).inv() })
+                    val checked = mask and (1 shl index) != 0
+                    Row(
+                        Modifier.fillMaxWidth().toggleable(
+                            value = checked,
+                            role = Role.Checkbox,
+                            onValueChange = { value -> mask = if (value) mask or (1 shl index) else mask and (1 shl index).inv() }
+                        ),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = checked, onCheckedChange = null)
                         Text(label)
                     }
                 }
             }
         }
-        item { if (projection != null) Text("با $remaining نماز باقی‌مانده، حدود ${projection.estimatedActiveDays()} روز فعال و پایان تقریبی ${CalendarDates.display(projection.estimatedCompletionDate(CalendarDates.today(timezoneId ?: ZoneId.systemDefault().id)))} لازم است.") }
+        item { if (projection != null) Text("با $remaining نماز باقی‌مانده، حدود ${projection.estimatedActiveDays()} روز فعال و پایان تقریبی ${CalendarDates.displayPreferred(projection.estimatedCompletionDate(CalendarDates.today(timezoneId ?: ZoneId.systemDefault().id)), calendarPreference ?: "PERSIAN")} لازم است.") }
         item { Text("روزه باقی‌مانده: $fastingRemaining روز؛ با هدف ${fastingTarget.toIntOrNull() ?: 0} در روز فعال، زمان تقریبی ${estimatedActiveDays(fastingRemaining.toLong(), (fastingTarget.toIntOrNull() ?: 1).coerceAtLeast(1))} روز فعال است.") }
         item { Text("یادآورها با WorkManager زمان‌بندی می‌شوند و ممکن است به‌دلیل حالت ذخیره باتری یا محدودیت سیستم‌عامل با تأخیر اجرا شوند.", style = MaterialTheme.typography.bodySmall) }
         item {
             if (reminders && notificationPermissionGranted) {
-                Text("مجوز اعلان فعال است؛ یادآور طبق برنامه زمان‌بندی می‌شود.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                Text("اعلان‌های برنامه فعال هستند؛ یادآور طبق برنامه زمان‌بندی می‌شود.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
             } else if (reminders) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("مجوز اعلان غیرفعال است؛ تا فعال‌کردن مجوز در تنظیمات دستگاه، اعلانی نمایش داده نمی‌شود.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text("مجوز یا نمایش اعلان‌های برنامه غیرفعال است؛ تا فعال‌کردن آن در تنظیمات دستگاه، اعلانی نمایش داده نمی‌شود.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = onOpenNotificationSettings, modifier = Modifier.fillMaxWidth()) { Text("تنظیم مجوز اعلان") }
                 }
             } else {
@@ -264,10 +317,12 @@ fun PlannerScreen(
 @Composable
 fun CalendarScreen(profile: UserProfileEntity?) {
     val zone = profile?.timezoneId ?: ZoneId.systemDefault().id
+    val preference = profile?.calendarPreference ?: "PERSIAN"
     val today = CalendarDates.today(zone)
+    val todayPreferred = CalendarDates.toPreferred(today, preference)
     val todayPersian = CalendarDates.toPersian(today)
     val todayIslamic = CalendarDates.toIslamicCivil(today)
-    var shownMonth by remember(todayPersian.year, todayPersian.month) { mutableStateOf(CalendarDate(todayPersian.year, todayPersian.month, 1)) }
+    var shownMonth by remember(preference, todayPreferred.year, todayPreferred.month) { mutableStateOf(CalendarDate(todayPreferred.year, todayPreferred.month, 1)) }
     var selectedDate by remember(today) { mutableStateOf(today) }
     fun shiftMonth(delta: Int) {
         val absolute = shownMonth.year.toLong() * 12 + shownMonth.month - 1 + delta
@@ -275,30 +330,32 @@ fun CalendarScreen(profile: UserProfileEntity?) {
         val month = Math.floorMod(absolute, 12L).toInt() + 1
         val firstDay = CalendarDate(year, month, 1)
         shownMonth = firstDay
-        selectedDate = CalendarDates.fromPersian(firstDay)
+        selectedDate = CalendarDates.fromPreferred(firstDay, preference)
     }
-    val monthStart = CalendarDates.fromPersian(shownMonth)
+    val monthStart = CalendarDates.fromPreferred(shownMonth, preference)
     val nextMonth = if (shownMonth.month == 12) CalendarDate(shownMonth.year + 1, 1, 1) else CalendarDate(shownMonth.year, shownMonth.month + 1, 1)
-    val monthDays = ChronoUnit.DAYS.between(monthStart, CalendarDates.fromPersian(nextMonth)).toInt()
+    val monthDays = ChronoUnit.DAYS.between(monthStart, CalendarDates.fromPreferred(nextMonth, preference)).toInt()
     val leading = (monthStart.dayOfWeek.value + 1) % 7 // Saturday is the first column.
+    val selectedPreferred = CalendarDates.toPreferred(selectedDate, preference)
     val selectedPersian = CalendarDates.toPersian(selectedDate)
     val selectedIslamic = CalendarDates.toIslamicCivil(selectedDate)
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("تقویم", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("امروز · ${today.format(DateTimeFormatter.ofPattern("EEEE d MMMM uuuu", Locale.forLanguageTag("fa-IR")))}", color = MaterialTheme.colorScheme.onPrimary)
-                Text("شمسی ${todayPersian.year}/${todayPersian.month}/${todayPersian.day}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge)
+                Text("امروز · ${calendarLabel(preference)} ${todayPreferred.year}/${todayPreferred.month}/${todayPreferred.day}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge)
+                Text("میلادی ${today.format(DateTimeFormatter.ofPattern("EEEE d MMMM uuuu", Locale.forLanguageTag("fa-IR")))}", color = MaterialTheme.colorScheme.onPrimary)
+                Text("شمسی ${todayPersian.year}/${todayPersian.month}/${todayPersian.day}", color = MaterialTheme.colorScheme.onPrimary)
                 Text("قمری محاسباتی ${todayIslamic.year}/${todayIslamic.month}/${todayIslamic.day}", color = MaterialTheme.colorScheme.onPrimary)
                 Text("منطقه زمانی: $zone", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { shiftMonth(-1) }) { Text("ماه قبل") }
-            Text("${shownMonth.year} · ماه ${shownMonth.month}", fontWeight = FontWeight.Bold)
+            Text("${calendarLabel(preference)} · ${shownMonth.year} · ماه ${shownMonth.month}", fontWeight = FontWeight.Bold)
             OutlinedButton(onClick = { shiftMonth(1) }) { Text("ماه بعد") }
         }
-        OutlinedButton(onClick = { shownMonth = CalendarDate(todayPersian.year, todayPersian.month, 1); selectedDate = today }) { Text("بازگشت به امروز") }
+        OutlinedButton(onClick = { shownMonth = CalendarDate(todayPreferred.year, todayPreferred.month, 1); selectedDate = today }) { Text("بازگشت به امروز") }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
             listOf("ش", "ی", "د", "س", "چ", "پ", "ج").forEach { Text(it, fontWeight = FontWeight.Bold) }
         }
@@ -306,8 +363,8 @@ fun CalendarScreen(profile: UserProfileEntity?) {
             items(42) { index ->
                 val day = index - leading + 1
                 if (day in 1..monthDays) {
-                    val persianDate = CalendarDate(shownMonth.year, shownMonth.month, day)
-                    val gregorian = CalendarDates.fromPersian(persianDate)
+                    val preferredDate = CalendarDate(shownMonth.year, shownMonth.month, day)
+                    val gregorian = CalendarDates.fromPreferred(preferredDate, preference)
                     val isSelected = gregorian == selectedDate
                     Card(onClick = { selectedDate = gregorian }, shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -321,6 +378,7 @@ fun CalendarScreen(profile: UserProfileEntity?) {
         Card {
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("تاریخ انتخاب‌شده", fontWeight = FontWeight.Bold)
+                Text("${calendarLabel(preference)}: ${selectedPreferred.year}/${selectedPreferred.month}/${selectedPreferred.day}")
                 Text("شمسی: ${selectedPersian.year}/${selectedPersian.month}/${selectedPersian.day}")
                 Text("میلادی: $selectedDate")
                 Text("قمری مدنی: ${selectedIslamic.year}/${selectedIslamic.month}/${selectedIslamic.day}")
@@ -332,7 +390,7 @@ fun CalendarScreen(profile: UserProfileEntity?) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>) {
+fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>, calendarPreference: String = "PERSIAN") {
     var search by remember { mutableStateOf("") }
     var recordFilter by remember { mutableStateOf("ALL") }
     val prayerCompleted = prayers.sumOf { it.completed.toLong() }
@@ -391,7 +449,7 @@ fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, 
             Card { Column(Modifier.padding(10.dp)) {
                 Text("$category · $kindLabel", fontWeight = FontWeight.SemiBold)
                 Text(if (record.kind.endsWith("ADJUSTMENT")) "${record.beforeCompleted} ← ${record.afterCompleted}" else "+${record.amount} مورد")
-                Text(CalendarDates.display(localDate), style = MaterialTheme.typography.labelSmall)
+                Text(CalendarDates.displayPreferred(localDate, calendarPreference), style = MaterialTheme.typography.labelSmall)
             } }
         }
     }
@@ -523,6 +581,13 @@ fun DailyVerseCard(result: DailyVerseResult, onRefresh: () -> Unit) {
                 Text(result.message ?: "برای دریافت آیه روز به اینترنت نیاز است.")
                 Text("با اتصال دوباره، محتوا را بارگیری کنید.", style = MaterialTheme.typography.bodySmall)
             } else {
+                if (result.stale) {
+                    Text(
+                        "آیه روز جاری در دسترس نیست؛ این آخرین آیه ذخیره‌شده برای تاریخ ${verse.dayKey} است.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 Text("سوره ${verse.surah} · آیه ${verse.ayah}", style = MaterialTheme.typography.labelMedium)
                 Text(verse.arabicText, style = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Serif), color = MaterialTheme.colorScheme.primary)
                 Text(verse.persianTranslation, style = MaterialTheme.typography.bodyLarge)

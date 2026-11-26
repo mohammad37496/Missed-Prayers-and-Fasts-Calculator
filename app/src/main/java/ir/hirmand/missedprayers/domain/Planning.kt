@@ -5,7 +5,7 @@ import java.time.temporal.ChronoUnit
 
 fun estimatedActiveDays(remaining: Long, dailyTarget: Int): Long {
     require(remaining >= 0 && dailyTarget > 0)
-    return if (remaining == 0L) 0L else (remaining + dailyTarget - 1L) / dailyTarget
+    return if (remaining == 0L) 0L else 1L + (remaining - 1L) / dailyTarget
 }
 
 data class PlanProjection(val remaining: Long, val dailyTarget: Int, val activeWeekdaysMask: Int) {
@@ -15,8 +15,14 @@ data class PlanProjection(val remaining: Long, val dailyTarget: Int, val activeW
         if (remaining == 0L) return from
         val activePerWeek = Integer.bitCount(activeWeekdaysMask)
         var first = from
-        while (activeWeekdaysMask and (1 shl (first.dayOfWeek.value - 1)) == 0) first = first.plusDays(1)
+        while (activeWeekdaysMask and (1 shl (first.dayOfWeek.value - 1)) == 0) {
+            require(first < LocalDate.MAX) { "روز فعال دیگری در محدوده تاریخ قابل نمایش وجود ندارد" }
+            first = first.plusDays(1)
+        }
         var remainingActiveDays = estimatedActiveDays() - 1
+        require(remainingActiveDays <= ChronoUnit.DAYS.between(first, LocalDate.MAX)) {
+            "زمان پایان برآوردشده خارج از محدوده تاریخ قابل نمایش است"
+        }
         val fullWeeks = remainingActiveDays / activePerWeek
         remainingActiveDays %= activePerWeek
         var candidate = first.plusDays(fullWeeks * 7)

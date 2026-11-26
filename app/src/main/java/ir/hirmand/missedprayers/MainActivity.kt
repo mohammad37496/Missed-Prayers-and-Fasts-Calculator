@@ -34,7 +34,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         System.loadLibrary("sqlcipher")
-        val databaseFailure = runCatching { AppDatabase.get(applicationContext) }.exceptionOrNull()
+        val databaseFailure = runCatching {
+            // Room opens lazily; building the singleton alone does not prove the
+            // SQLCipher key, database header or migrations can actually be opened.
+            AppDatabase.get(applicationContext).openHelper.writableDatabase
+        }.exceptionOrNull()
         val keyMaterialMissing = databaseFailure?.message?.contains("کلید") == true
         setContent {
             MissedWorshipTheme {

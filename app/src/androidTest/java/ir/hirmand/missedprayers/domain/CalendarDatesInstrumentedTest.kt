@@ -6,6 +6,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDate
+import java.util.Locale
 
 @RunWith(AndroidJUnit4::class)
 class CalendarDatesInstrumentedTest {
@@ -17,6 +18,15 @@ class CalendarDatesInstrumentedTest {
     @Test fun islamicCivilRoundTrip() {
         val gregorian = LocalDate.of(2024, 3, 20)
         assertEquals(gregorian, CalendarDates.fromIslamicCivil(CalendarDates.toIslamicCivil(gregorian)))
+    }
+
+    @Test fun preferredCalendarRoundTripsForAllSupportedCalendars() {
+        val date = LocalDate.of(2024, 3, 20)
+        listOf("PERSIAN", "ISLAMIC_CIVIL", "GREGORIAN").forEach { preference ->
+            assertEquals(date, CalendarDates.fromPreferred(CalendarDates.toPreferred(date, preference), preference))
+        }
+        assertEquals("1403/01/01", CalendarDates.displayPreferred(date, "PERSIAN", Locale.ROOT))
+        assertEquals("2024/03/20", CalendarDates.displayPreferred(date, "GREGORIAN", Locale.ROOT))
     }
 
     @Test fun rejectsInvalidPersianDate() {

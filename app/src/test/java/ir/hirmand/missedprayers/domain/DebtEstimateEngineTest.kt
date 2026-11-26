@@ -56,4 +56,26 @@ class DebtEstimateEngineTest {
         assertEquals(107_374_183L, projection.estimatedActiveDays())
         assertEquals(71_582_789L, estimatedActiveDays(Int.MAX_VALUE.toLong(), 30))
     }
+
+    @Test fun plannerCeilingDivisionDoesNotOverflowAtLongMaximum() {
+        assertEquals(Long.MAX_VALUE, estimatedActiveDays(Long.MAX_VALUE, 1))
+        assertEquals(4_611_686_018_427_387_904L, estimatedActiveDays(Long.MAX_VALUE, 2))
+    }
+
+    @Test fun plannerRejectsCompletionDatesBeyondSupportedCalendarRange() {
+        val projection = PlanProjection(remaining = Long.MAX_VALUE, dailyTarget = 2, activeWeekdaysMask = 127)
+        assertTrue(runCatching { projection.estimatedCompletionDate(LocalDate.parse("2026-11-26")) }.isFailure)
+    }
+
+    @Test fun estimateCanIncludeTheMaximumSupportedLocalDate() {
+        val result = DebtEstimateEngine.estimate(LocalDate.MAX, LocalDate.MAX, context)
+        assertEquals(1, result.prayerUnitsByType[PrayerType.FAJR])
+        assertEquals(1, result.fastingDays)
+    }
+
+    @Test fun plannerRejectsNextActiveDayBeyondMaximumLocalDate() {
+        val nextWeekday = 1 shl (LocalDate.MAX.dayOfWeek.value % 7)
+        val projection = PlanProjection(remaining = 1, dailyTarget = 1, activeWeekdaysMask = nextWeekday)
+        assertTrue(runCatching { projection.estimatedCompletionDate(LocalDate.MAX) }.isFailure)
+    }
 }

@@ -55,8 +55,12 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
             .onFailure { onError(it.message ?: "ذخیره اطلاعات انجام نشد") }
     }
 
-    fun recordPrayer(type: PrayerType, amount: Int = 1) = viewModelScope.launch { repository.recordPrayer(type, amount) }
-    fun recordFasting(amount: Int = 1) = viewModelScope.launch { repository.recordFasting(amount) }
+    fun recordPrayer(type: PrayerType, amount: Int = 1, onError: (String) -> Unit = {}) = viewModelScope.launch {
+        runCatching { repository.recordPrayer(type, amount) }.onFailure { onError(it.message ?: "ثبت نماز انجام نشد") }
+    }
+    fun recordFasting(amount: Int = 1, onError: (String) -> Unit = {}) = viewModelScope.launch {
+        runCatching { repository.recordFasting(amount) }.onFailure { onError(it.message ?: "ثبت روزه انجام نشد") }
+    }
     fun undoRecord(id: Long, onError: (String) -> Unit = {}) = viewModelScope.launch {
         runCatching { repository.undoRecord(id) }.onFailure { onError(it.message ?: "بازگردانی انجام نشد") }
     }
@@ -69,11 +73,13 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
         runCatching { repository.saveProfile(profile) }.onFailure { onError(it.message ?: "ذخیره پروفایل انجام نشد") }
     }
 
-    fun addExcusePeriod(kind: String, start: LocalDate, end: LocalDate, note: String?, onError: (String) -> Unit = {}) = viewModelScope.launch {
-        runCatching { repository.addExcusePeriod(kind, start, end, note) }.onFailure { onError(it.message ?: "ثبت بازه انجام نشد") }
+    suspend fun addExcusePeriod(kind: String, start: LocalDate, end: LocalDate, note: String?) {
+        repository.addExcusePeriod(kind, start, end, note)
     }
 
-    fun deleteExcusePeriod(id: Long) = viewModelScope.launch { repository.deleteExcusePeriod(id) }
+    fun deleteExcusePeriod(id: Long, onError: (String) -> Unit = {}) = viewModelScope.launch {
+        runCatching { repository.deleteExcusePeriod(id) }.onFailure { onError(it.message ?: "حذف بازه انجام نشد") }
+    }
 
     fun savePlannerSettings(settings: PlannerSettingsEntity, onError: (String) -> Unit = {}) = viewModelScope.launch {
         runCatching { repository.savePlannerSettings(settings) }.onFailure { onError(it.message ?: "ذخیره برنامه انجام نشد") }
