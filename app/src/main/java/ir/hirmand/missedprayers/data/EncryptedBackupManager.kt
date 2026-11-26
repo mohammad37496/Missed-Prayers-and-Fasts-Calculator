@@ -1,0 +1,123 @@
+package ir.hirmand.missedprayers.data
+
+import androidx.room.withTransaction
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.LocalDate
+import java.time.ZoneId
+
+class EncryptedBackupManager(private val database: AppDatabase) {
+    suspend fun createBackup(password: CharArray): ByteArray = withContext(Dispatchers.IO) {
+        val payload = database.withTransaction {
+        val dao = database.debtDao()
+        val payload = JSONObject().put("schemaVersion", 5).put("createdAt", System.currentTimeMillis())
+        payload.put("prayers", JSONArray().also { array -> dao.getAllPrayers().forEach { array.put(JSONObject().put("type", it.prayerType).put("total", it.total).put("completed", it.completed).put("updatedAt", it.updatedAt)) } })
+        payload.put("fasting", dao.getFastingSnapshot()?.let { JSONObject().put("total", it.total).put("completed", it.completed).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
+        payload.put("records", JSONArray().also { array -> dao.getAllRecords().forEach { array.put(JSONObject().put("id", it.id).put("kind", it.kind).put("reference", it.reference).put("amount", it.amount).put("createdAt", it.createdAt).put("beforeCompleted", it.beforeCompleted).put("afterCompleted", it.afterCompleted)) } })
+        payload.put("profile", dao.getProfileSnapshot()?.let { JSONObject().put("displayName", it.displayName ?: JSONObject.NULL).put("gender", it.gender).put("taklifStartDate", it.taklifStartDate ?: JSONObject.NULL).put("taklifEndDate", it.taklifEndDate ?: JSONObject.NULL).put("timezoneId", it.timezoneId).put("calendarPreference", it.calendarPreference).put("marjaId", it.marjaId ?: JSONObject.NULL).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
+        payload.put("periods", JSONArray().also { array -> dao.getAllExcusePeriods().forEach { array.put(JSONObject().put("id", it.id).put("kind", it.kind).put("startDate", it.startDate).put("endDate", it.endDate).put("note", it.note ?: JSONObject.NULL).put("createdAt", it.createdAt)) } })
+        payload.put("planner", dao.getPlannerSettingsSnapshot()?.let { JSONObject().put("dailyPrayerTarget", it.dailyPrayerTarget).put("dailyFastingTarget", it.dailyFastingTarget).put("activeWeekdaysMask", it.activeWeekdaysMask).put("reminderEnabled", it.reminderEnabled).put("reminderHour", it.reminderHour).put("reminderMinute", it.reminderMinute).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
+        payload.put("fiqh", dao.getFiqhPreferencesSnapshot()?.let { JSONObject().put("marjaId", it.marjaId ?: JSONObject.NULL).put("rulesetVersion", it.rulesetVersion ?: JSONObject.NULL).put("acceptedSourceUrl", it.acceptedSourceUrl ?: JSONObject.NULL).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
+        payload.put("dailyVerses", JSONArray().also { array -> dao.getAllDailyVerses().forEach { array.put(JSONObject().put("dayKey", it.dayKey).put("surah", it.surah).put("ayah", it.ayah).put("globalNumber", it.globalNumber).put("arabicText", it.arabicText).put("persianTranslation", it.persianTranslation).put("translationSource", it.translationSource).put("translationVersion", it.translationVersion).put("tafsirText", it.tafsirText ?: JSONObject.NULL).put("tafsirSource", it.tafsirSource ?: JSONObject.NULL).put("recitationUrl", it.recitationUrl ?: JSONObject.NULL).put("reciterName", it.reciterName ?: JSONObject.NULL).put("fetchedAt", it.fetchedAt)) } })
+        payload
+        }
+        EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+    }
+
+    suspend fun restoreBackup(file: ByteArray, password: CharArray) = withContext(Dispatchers.IO) {
+        require(file.size <= EncryptedBackupCodec.MAX_FILE_BYTES) { "فایل پشتیبان بیش از حد بزرگ است" }
+        val plain = EncryptedBackupCodec.decrypt(file, password)
+        val root = JSONObject(plain.toString(Charsets.UTF_8))
+        val backupVersion = root.getInt("schemaVersion")
+        require(backupVersion in 4..5) { "نسخه ساختار فایل پشتیبان پشتیبانی نمی‌شود" }
+        val prayers = root.getJSONArray("prayers").toEntities { item ->
+            val type = item.getString("type")
+            require(type in setOf("FAJR", "DHUHR", "ASR", "MAGHRIB", "ISHA"))
+            val total = item.getInt("total"); val completed = item.getInt("completed")
+            require(total >= 0 && completed in 0..total)
+            PrayerDebtEntity(type, total, completed, item.getLong("updatedAt"))
+        }
+        require(prayers.map { it.prayerType }.distinct().size == prayers.size && prayers.size <= 5)
+        val fastingObject = root.optJSONObject("fasting")
+        val fasting = fastingObject?.let {
+            val total = it.getInt("total"); val completed = it.getInt("completed")
+            require(total >= 0 && completed in 0..total)
+            FastingDebtEntity(total = total, completed = completed, updatedAt = it.getLong("updatedAt"))
+        }
+        val records = root.getJSONArray("records").toEntities { item ->
+            val kind = item.getString("kind"); val reference = item.getString("reference"); val amount = item.getInt("amount")
+            require(amount > 0 && ((kind in setOf("PRAYER", "PRAYER_ADJUSTMENT") && reference in setOf("FAJR", "DHUHR", "ASR", "MAGHRIB", "ISHA")) || (kind in setOf("FASTING", "FASTING_ADJUSTMENT") && reference == "FASTING")))
+            val before = if (backupVersion >= 5) item.getInt("beforeCompleted") else 0
+            val after = if (backupVersion >= 5) item.getInt("afterCompleted") else 0
+            require(before >= 0 && after >= 0)
+            if (backupVersion >= 5) {
+                require(if (kind.endsWith("ADJUSTMENT")) kotlin.math.abs(after.toLong() - before.toLong()) == amount.toLong() else after.toLong() - before.toLong() == amount.toLong())
+            }
+            DebtRecordEntity(item.getLong("id"), kind, reference, amount, item.getLong("createdAt"), before, after)
+        }
+        require(records.size <= 100_000 && records.map { it.id }.distinct().size == records.size)
+        val profile = root.optJSONObject("profile")?.let {
+            val start = it.optNullableString("taklifStartDate")?.let(LocalDate::parse)
+            val end = it.optNullableString("taklifEndDate")?.let(LocalDate::parse)
+            require(start == null || end == null || !end.isBefore(start))
+            val gender = it.getString("gender"); val calendar = it.getString("calendarPreference")
+            require(gender in setOf("UNSPECIFIED", "WOMAN", "MAN", "PREFER_NOT_TO_SAY"))
+            require(calendar in setOf("PERSIAN", "GREGORIAN", "ISLAMIC_CIVIL"))
+            val zone = it.getString("timezoneId"); ZoneId.of(zone)
+            val marja = it.optNullableString("marjaId")
+            require(marja == null || marja.matches(Regex("[a-z0-9_-]{2,48}")))
+            UserProfileEntity(displayName = it.optNullableString("displayName")?.take(60), gender = gender, taklifStartDate = start?.toString(), taklifEndDate = end?.toString(), timezoneId = zone, calendarPreference = calendar, marjaId = marja, updatedAt = it.getLong("updatedAt"))
+        }
+        val periods = root.getJSONArray("periods").toEntities { item ->
+            val kind = item.getString("kind"); val start = LocalDate.parse(item.getString("startDate")); val end = LocalDate.parse(item.getString("endDate"))
+            require(kind in setOf("MENSTRUATION", "POSTPARTUM", "ILLNESS", "OTHER_USER_RECORDED") && !end.isBefore(start))
+            ExcusePeriodEntity(item.getLong("id"), kind, start.toString(), end.toString(), item.optNullableString("note"), item.getLong("createdAt"))
+        }
+        require(periods.size <= 10_000 && periods.map { it.id }.distinct().size == periods.size)
+        val planner = root.optJSONObject("planner")?.let {
+            val target = it.getInt("dailyPrayerTarget"); val fastTarget = it.getInt("dailyFastingTarget"); val mask = it.getInt("activeWeekdaysMask")
+            val hour = it.getInt("reminderHour"); val minute = it.getInt("reminderMinute")
+            require(target in 1..100 && fastTarget in 1..30 && mask in 1..127 && hour in 0..23 && minute in 0..59)
+            PlannerSettingsEntity(dailyPrayerTarget = target, dailyFastingTarget = fastTarget, activeWeekdaysMask = mask, reminderEnabled = it.getBoolean("reminderEnabled"), reminderHour = hour, reminderMinute = minute, updatedAt = it.getLong("updatedAt"))
+        }
+        val fiqh = root.optJSONObject("fiqh")?.let {
+            val url = it.optNullableString("acceptedSourceUrl")
+            require(url == null || url.startsWith("https://"))
+            val marja = it.optNullableString("marjaId")
+            require(marja == null || marja.matches(Regex("[a-z0-9_-]{2,48}")))
+            FiqhPreferencesEntity(marjaId = marja, rulesetVersion = it.optNullableString("rulesetVersion")?.take(80), acceptedSourceUrl = url, updatedAt = it.getLong("updatedAt"))
+        }
+        val verses = root.getJSONArray("dailyVerses").toEntities { item ->
+            LocalDate.parse(item.getString("dayKey"))
+            val surah = item.getInt("surah"); val ayah = item.getInt("ayah"); val global = item.getInt("globalNumber")
+            require(surah in 1..114 && ayah in 1..286 && global in 1..6236)
+            val audio = item.optNullableString("recitationUrl")
+            require(audio == null || runCatching { java.net.URI(audio).let { it.scheme == "https" && it.userInfo == null && it.port in listOf(-1, 443) && it.host in setOf("download.quranicaudio.com", "audio.qurancdn.com") } }.getOrDefault(false))
+            DailyVerseEntity(item.getString("dayKey"), surah, ayah, global, item.getString("arabicText").take(5000), item.getString("persianTranslation").take(5000), item.getString("translationSource").take(240), item.getString("translationVersion").take(80), item.optNullableString("tafsirText")?.take(8000), item.optNullableString("tafsirSource")?.take(240), audio, item.optNullableString("reciterName")?.take(120), item.getLong("fetchedAt"))
+        }
+        require(verses.size <= 60 && verses.map { it.dayKey }.distinct().size == verses.size)
+
+        val dao = database.debtDao()
+        database.withTransaction {
+            dao.clearPrayers(); dao.clearFasting(); dao.clearRecords(); dao.clearProfile(); dao.clearExcusePeriods()
+            dao.clearPlannerSettings(); dao.clearFiqhPreferences(); dao.clearDailyVerses()
+            if (prayers.isNotEmpty()) dao.saveAllPrayers(prayers)
+            if (fasting != null) dao.saveAllFasting(fasting)
+            if (records.isNotEmpty()) dao.saveAllRecords(records)
+            if (profile != null) dao.saveAllProfiles(profile)
+            if (periods.isNotEmpty()) dao.saveAllExcusePeriods(periods)
+            if (planner != null) dao.saveAllPlannerSettings(planner)
+            if (fiqh != null) dao.saveAllFiqhPreferences(fiqh)
+            if (verses.isNotEmpty()) dao.saveAllDailyVerses(verses)
+        }
+    }
+
+    private fun <T> JSONArray.toEntities(mapper: (JSONObject) -> T): List<T> {
+        require(length() <= 100_000) { "تعداد رکوردهای فایل پشتیبان بیش از حد مجاز است" }
+        return (0 until length()).map { mapper(getJSONObject(it)) }
+    }
+
+    private fun JSONObject.optNullableString(key: String): String? = if (!has(key) || isNull(key)) null else getString(key)
+}

@@ -1,0 +1,12 @@
+Tanzil Quran Text (Uthmani, Version 1.1)
+Copyright (C) 2007-2026 Tanzil Project
+License: Creative Commons Attribution 3.0
+Source: https://tanzil.net/download/
+Updates: https://tanzil.net/updates/
+License terms: https://tanzil.net/docs/Text_License
+
+Permission is granted to copy and distribute verbatim copies of the Quran text, but changing the text is not allowed. The text is used verbatim in this application. Tanzil Project is clearly credited in the app and this source link is provided so users can track changes.
+
+The bundled tanzil_uthmani_v1.1.txt file was downloaded from the official Tanzil download endpoint with Uthmani text, pause marks, sajdah signs, rub-el-hizb signs and tatweel enabled. It includes the original Tanzil copyright and terms block. The file is kept unchanged.
+
+SHA-256: BF4F57B968D03F4131C070B1E285DA9BE0E0A108A21C910E872801CA273312C8
