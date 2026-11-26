@@ -50,7 +50,7 @@
 
 ## ساخت و آزمون
 
-JDK 17 لازم است. Android SDK Platform 37 باید نصب باشد. مسیر SDK محلی در `local.properties` تنظیم می‌شود و این فایل نباید commit شود.
+JDK 17 لازم است. Android SDK Platform 36 باید نصب باشد. مسیر SDK محلی در `local.properties` تنظیم می‌شود و این فایل نباید commit شود.
 
 ```powershell
 ./gradlew.bat testDebugUnitTest
@@ -67,6 +67,6 @@ APK دیباگ: `app/build/outputs/apk/debug/app-debug.apk`.
 
 - `testDebugUnitTest`، `compileDebugAndroidTestKotlin`، `assembleDebug` و `lintDebug` روی JDK 17 اجرا شده‌اند.
 - تست‌های instrumentation کامپایل شده‌اند، اما تا زمان اتصال دستگاه یا راه‌اندازی emulator اجرا نشده‌اند.
-- targetSdk فعلی 35 است؛ پروژه با SDK 37 کامپایل می‌شود، اما تغییر targetSdk به 36/37 نیازمند آزمون سازگاری روی نسخه‌های جدید Android است.
+- targetSdk فعلی 36 است؛ آزمون سازگاری روی دستگاه‌های Android 16 و نسخه‌های بالاتر هنوز انجام نشده است.
 - زمان‌بندی WorkManager دقیق/AlarmClock نیست و سیستم‌عامل ممکن است اعلان را در حالت Doze یا Battery Saver به تأخیر بیندازد.
 - این پروژه هنوز برای انتشار عمومی/فروشگاهی تأیید یا منتشر نشده است.
