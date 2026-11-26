@@ -777,7 +777,9 @@ class EncryptedBackupRestoreValidationTest {
             },
             contentProvider = provider
         )
-        val day = LocalDate.parse("2026-01-01")
+        // Daily verses are a seven-calendar-day cache, so keep this round-trip
+        // fixture inside the same window used by restore validation.
+        val day = LocalDate.now(java.time.ZoneId.systemDefault())
         val loaded = repository.loadFor(day, forceRefresh = true)
         assertEquals(footnotes, loaded.verse?.translationFootnotes)
 

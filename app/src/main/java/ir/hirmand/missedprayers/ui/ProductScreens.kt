@@ -309,7 +309,19 @@ fun PlannerScreen(
     var hour by remember(settings) { mutableStateOf((settings?.reminderHour ?: 20).toString()) }
     var minute by remember(settings) { mutableStateOf((settings?.reminderMinute ?: 0).toString()) }
     val remaining = prayers.sumOf { it.second.toLong() }
-    val projection = runCatching { PlanProjection(remaining, prayerTarget.toInt(), mask) }.getOrNull()
+    val prayerTargetValue = prayerTarget.toIntOrNull()
+    val fastingTargetValue = fastingTarget.toIntOrNull()
+    val hourValue = hour.toIntOrNull()
+    val minuteValue = minute.toIntOrNull()
+    val projection = runCatching { PlanProjection(remaining, prayerTargetValue ?: 0, mask) }.getOrNull()
+    val validationMessage = when {
+        prayerTargetValue !in 1..100 -> "هدف روزانه نماز باید عددی بین ۱ تا ۱۰۰ باشد."
+        mask == 0 -> "حداقل یک روز فعال در هفته انتخاب کنید."
+        fastingTargetValue !in 1..30 -> "هدف روزانه روزه باید عددی بین ۱ تا ۳۰ باشد."
+        hourValue !in 0..23 -> "ساعت یادآور باید بین ۰ تا ۲۳ باشد."
+        minuteValue !in 0..59 -> "دقیقه یادآور باید بین ۰ تا ۵۹ باشد."
+        else -> null
+    }
     LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("برنامه‌ریز جبران", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
         item { Text("هدف‌ها را خودتان تعیین می‌کنید. برآورد زمان پایان، برنامه‌ای تقریبی است و روزهای انتخابی هفته را لحاظ می‌کند.") }
@@ -334,8 +346,15 @@ fun PlannerScreen(
                 }
             }
         }
+        if (validationMessage != null) {
+            item { Text(validationMessage, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
+        }
         item { if (projection != null) Text("با $remaining نماز باقی‌مانده، حدود ${projection.estimatedActiveDays()} روز فعال و پایان تقریبی ${CalendarDates.displayPreferred(projection.estimatedCompletionDate(CalendarDates.today(timezoneId ?: ZoneId.systemDefault().id)), calendarPreference ?: "PERSIAN")} لازم است.") }
-        item { Text("روزه باقی‌مانده: $fastingRemaining روز؛ با هدف ${fastingTarget.toIntOrNull() ?: 0} در روز فعال، زمان تقریبی ${estimatedActiveDays(fastingRemaining.toLong(), (fastingTarget.toIntOrNull() ?: 1).coerceAtLeast(1))} روز فعال است.") }
+        item {
+            if (fastingTargetValue in 1..30) {
+                Text("روزه باقی‌مانده: $fastingRemaining روز؛ با هدف $fastingTargetValue در روز فعال، زمان تقریبی ${estimatedActiveDays(fastingRemaining.toLong(), fastingTargetValue!!)} روز فعال است.")
+            }
+        }
         item { Text("یادآورها با WorkManager زمان‌بندی می‌شوند و ممکن است به‌دلیل حالت ذخیره باتری یا محدودیت سیستم‌عامل با تأخیر اجرا شوند.", style = MaterialTheme.typography.bodySmall) }
         item {
             if (reminders && notificationPermissionGranted) {
@@ -368,7 +387,7 @@ fun PlannerScreen(
                 OutlinedTextField(minute, { minute = it.filter(Char::isDigit).take(2) }, label = { Text("دقیقه") }, modifier = Modifier.weight(1f))
             }
         }
-        item { Button(onClick = { onSave(PlannerSettingsEntity(dailyPrayerTarget = prayerTarget.toIntOrNull() ?: 5, dailyFastingTarget = fastingTarget.toIntOrNull() ?: 1, activeWeekdaysMask = mask, reminderEnabled = reminders, reminderHour = hour.toIntOrNull() ?: 20, reminderMinute = minute.toIntOrNull() ?: 0, updatedAt = System.currentTimeMillis())) }, modifier = Modifier.fillMaxWidth(), enabled = projection != null && fastingTarget.toIntOrNull() in 1..30 && hour.toIntOrNull() in 0..23 && minute.toIntOrNull() in 0..59) { Text("ذخیره برنامه و یادآورها") }
+        item { Button(onClick = { onSave(PlannerSettingsEntity(dailyPrayerTarget = prayerTargetValue!!, dailyFastingTarget = fastingTargetValue!!, activeWeekdaysMask = mask, reminderEnabled = reminders, reminderHour = hourValue!!, reminderMinute = minuteValue!!, updatedAt = System.currentTimeMillis())) }, modifier = Modifier.fillMaxWidth(), enabled = projection != null && validationMessage == null) { Text("ذخیره برنامه و یادآورها") }
     }
     }
 }
@@ -398,7 +417,8 @@ fun CalendarScreen(profile: UserProfileEntity?) {
     val selectedPreferred = CalendarDates.toPreferred(selectedDate, preference)
     val selectedPersian = CalendarDates.toPersian(selectedDate)
     val selectedIslamic = CalendarDates.toIslamicCivil(selectedDate)
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
         Text("تقویم", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -418,7 +438,9 @@ fun CalendarScreen(profile: UserProfileEntity?) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
             listOf("ش", "ی", "د", "س", "چ", "پ", "ج").forEach { Text(it, fontWeight = FontWeight.Bold) }
         }
-        LazyVerticalGrid(columns = GridCells.Fixed(7), modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        }
+        item {
+        LazyVerticalGrid(columns = GridCells.Fixed(7), modifier = Modifier.fillMaxWidth().height(312.dp), verticalArrangement = Arrangement.spacedBy(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             items(42) { index ->
                 val day = index - leading + 1
                 if (day in 1..monthDays) {
@@ -434,6 +456,8 @@ fun CalendarScreen(profile: UserProfileEntity?) {
                 } else Spacer(Modifier.fillMaxWidth().padding(vertical = 12.dp))
             }
         }
+        }
+        item {
         Card {
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("تاریخ انتخاب‌شده", fontWeight = FontWeight.Bold)
@@ -444,6 +468,7 @@ fun CalendarScreen(profile: UserProfileEntity?) {
             }
         }
         Text("تاریخ قمری بر اساس تقویم محاسباتی مدنی است و ممکن است با رؤیت هلال یا تقویم رسمی محل زندگی تفاوت داشته باشد.", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -578,7 +603,7 @@ private fun WeeklyActivityChart(records: List<ir.hirmand.missedprayers.data.Debt
                 Canvas(
                     Modifier.fillMaxWidth().height(132.dp).semantics {
                         contentDescription = dailyActivity.joinToString("؛ ") { (date, prayer, fasting) ->
-                            "${date.dayOfMonth}: نماز $prayer، روزه $fasting"
+                            "${date}: نماز $prayer، روزه $fasting"
                         }
                     }
                 ) {
@@ -595,7 +620,11 @@ private fun WeeklyActivityChart(records: List<ir.hirmand.missedprayers.data.Debt
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     dailyActivity.forEach { (date, _, _) ->
-                        Text(date.dayOfMonth.toString(), style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            "${date.dayOfMonth}/${date.monthValue}",
+                            modifier = Modifier.semantics { contentDescription = date.toString() },
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -766,12 +795,12 @@ fun BackupScreen(status: String?, onCreate: (String) -> Unit, onRestore: (String
 
 @Composable
 fun MoreScreen(onProfile: () -> Unit, onFiqh: () -> Unit, onBackup: () -> Unit, onHelp: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("بخش‌های بیشتر", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Button(onClick = onProfile, modifier = Modifier.fillMaxWidth()) { Text("پروفایل و اطلاعات برآورد") }
-        Button(onClick = onFiqh, modifier = Modifier.fillMaxWidth()) { Text("تنظیمات فقهی و مدیریت داده‌ها") }
-        Button(onClick = onBackup, modifier = Modifier.fillMaxWidth()) { Text("پشتیبان‌گیری و بازیابی امن") }
-        OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) { Text("راهنما و پرسش‌های متداول") }
+    LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("بخش‌های بیشتر", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+        item { Button(onClick = onProfile, modifier = Modifier.fillMaxWidth()) { Text("پروفایل و اطلاعات برآورد") } }
+        item { Button(onClick = onFiqh, modifier = Modifier.fillMaxWidth()) { Text("تنظیمات فقهی و مدیریت داده‌ها") } }
+        item { Button(onClick = onBackup, modifier = Modifier.fillMaxWidth()) { Text("پشتیبان‌گیری و بازیابی امن") } }
+        item { OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) { Text("راهنما و پرسش‌های متداول") } }
     }
 }
 
@@ -863,10 +892,11 @@ fun DatabaseUnavailableScreen(
             recoveryViewModel.restoreFromUri(context.contentResolver, uri, onRestoreBackup)
         }
     }
-    Column(
+    LazyColumn(
         Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        item {
         Text(
             "دسترسی به پایگاه داده امن ممکن نیست",
             style = MaterialTheme.typography.headlineSmall,
@@ -902,6 +932,7 @@ fun DatabaseUnavailableScreen(
             Text("اعتبارسنجی و بازیابی اتمیک اطلاعات…")
         }
         recoveryState.error?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
+        }
     }
 }
 

@@ -3,9 +3,14 @@ package ir.hirmand.missedprayers.ui
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.LayoutDirection
+import ir.hirmand.missedprayers.data.DebtRecordEntity
 import ir.hirmand.missedprayers.domain.CalendarDates
 import ir.hirmand.missedprayers.ui.theme.MissedWorshipTheme
 import org.junit.Assert.assertEquals
@@ -13,6 +18,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.time.LocalDate
+import java.time.ZoneId
 
 @RunWith(AndroidJUnit4::class)
 class RtlLayoutTest {
@@ -40,5 +47,73 @@ class RtlLayoutTest {
         composeRule.onNodeWithText(preferred.day.toString()).assertIsSelected()
         composeRule.onNodeWithText(otherDay.toString()).performClick()
         composeRule.onNodeWithText(otherDay.toString()).assertIsSelected()
+    }
+
+    @Test fun calendarDetailsRemainReachableThroughVerticalScrolling() {
+        composeRule.setContent {
+            MissedWorshipTheme { CalendarScreen(profile = null) }
+        }
+
+        val caveat = "تاریخ قمری بر اساس تقویم محاسباتی مدنی است و ممکن است با رؤیت هلال یا تقویم رسمی محل زندگی تفاوت داشته باشد."
+        composeRule.onNodeWithText(caveat).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun plannerExplainsWhenEveryWeekdayIsDisabled() {
+        composeRule.setContent {
+            MissedWorshipTheme {
+                PlannerScreen(
+                    settings = null,
+                    prayers = listOf("FAJR" to 5),
+                    fastingRemaining = 0,
+                    timezoneId = "UTC",
+                    calendarPreference = "PERSIAN",
+                    notificationPermissionGranted = true,
+                    onOpenNotificationSettings = {},
+                    onSave = {}
+                )
+            }
+        }
+
+        listOf("دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه")
+            .forEach { composeRule.onNodeWithText(it).performClick() }
+
+        composeRule.onNodeWithText("حداقل یک روز فعال در هفته انتخاب کنید.").assertExists()
+        composeRule.onNodeWithText("ذخیره برنامه و یادآورها").assertIsNotEnabled()
+    }
+
+    @Test fun weeklyActivityChartExposesUnambiguousFullDatesToAccessibility() {
+        val today = LocalDate.now(ZoneId.systemDefault())
+        val record = DebtRecordEntity(
+            id = 1,
+            kind = "PRAYER",
+            reference = "FAJR",
+            amount = 1,
+            createdAt = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            beforeCompleted = 0,
+            afterCompleted = 1
+        )
+        composeRule.setContent {
+            MissedWorshipTheme {
+                ReportsScreen(
+                    prayers = emptyList(),
+                    fasting = null,
+                    records = listOf(record),
+                    timezoneId = ZoneId.systemDefault().id,
+                    onUndoRecord = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription(today.toString()).assertExists()
+    }
+
+    @Test fun moreDestinationsRemainReachableThroughVerticalScrolling() {
+        composeRule.setContent {
+            MissedWorshipTheme {
+                MoreScreen(onProfile = {}, onFiqh = {}, onBackup = {}, onHelp = {})
+            }
+        }
+
+        composeRule.onNodeWithText("راهنما و پرسش‌های متداول").performScrollTo().assertIsDisplayed()
     }
 }
