@@ -36,6 +36,39 @@ class EncryptedBackupRestoreValidationTest {
 
     @After fun tearDown() { database.close() }
 
+    @Test fun profileReestimateNeverSilentlyLowersPreviouslyEnteredDebtTotals() = runBlocking {
+        val dao = database.debtDao()
+        val now = System.currentTimeMillis()
+        dao.savePrayer(PrayerDebtEntity("FAJR", total = 100, completed = 10, updatedAt = now))
+        dao.saveFasting(FastingDebtEntity(total = 80, completed = 5, updatedAt = now))
+        val today = LocalDate.now(java.time.ZoneId.of("UTC"))
+        val profile = UserProfileEntity(
+            displayName = null, gender = "UNSPECIFIED", taklifStartDate = today.minusDays(1).toString(),
+            taklifEndDate = null, timezoneId = "UTC", calendarPreference = "PERSIAN", marjaId = null, updatedAt = now
+        )
+
+        DebtRepository(database).saveProfileAndApplyRawDateEstimate(profile, prayerPerType = 1, fastingDays = 1)
+
+        assertEquals(100, dao.getPrayer("FAJR")?.total)
+        assertEquals(10, dao.getPrayer("FAJR")?.completed)
+        assertEquals(80, dao.getFasting()?.total)
+        assertEquals(5, dao.getFasting()?.completed)
+    }
+
+    @Test fun profileRejectsFutureObligationStartAndEndDates() = runBlocking {
+        val repository = DebtRepository(database)
+        val today = LocalDate.now(java.time.ZoneId.of("UTC"))
+        fun profile(start: LocalDate, end: LocalDate?) = UserProfileEntity(
+            displayName = null, gender = "UNSPECIFIED", taklifStartDate = start.toString(),
+            taklifEndDate = end?.toString(), timezoneId = "UTC", calendarPreference = "PERSIAN", marjaId = null,
+            updatedAt = System.currentTimeMillis()
+        )
+
+        assertTrue(runCatching { repository.saveProfile(profile(today.plusDays(1), null)) }.isFailure)
+        assertTrue(runCatching { repository.saveProfile(profile(today.minusDays(1), today.plusDays(1))) }.isFailure)
+        assertNull(database.debtDao().getProfileSnapshot())
+    }
+
     @Test fun releaseSafeContentModeDoesNotRequestOrExposeUnverifiedTafsirOrAudio() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         var tafsirCatalogueCalls = 0

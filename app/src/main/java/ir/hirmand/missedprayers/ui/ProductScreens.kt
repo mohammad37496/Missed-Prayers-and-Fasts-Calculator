@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -80,6 +81,7 @@ import ir.hirmand.missedprayers.data.PrayerDebtEntity
 import ir.hirmand.missedprayers.data.UserProfileEntity
 import ir.hirmand.missedprayers.domain.CalendarDates
 import ir.hirmand.missedprayers.domain.CalendarDate
+import ir.hirmand.missedprayers.domain.DebtEstimate
 import ir.hirmand.missedprayers.domain.DebtEstimateEngine
 import ir.hirmand.missedprayers.domain.FiqhEvaluationContext
 import ir.hirmand.missedprayers.domain.RecordedPeriod
@@ -93,10 +95,11 @@ import java.time.Duration
 import java.time.ZonedDateTime
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.launch
 
 private fun calendarLabel(preference: String): String = when (preference) {
     "PERSIAN" -> "شمسی"
@@ -142,16 +145,25 @@ fun ProfileScreen(
     var periodEnd by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val estimatePreview = runCatching {
-        if (start.isBlank()) null else {
-            val from = parseCalendarInput(start, calendar)
-            val to = end.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar) } ?: CalendarDates.today(timezoneId)
-            DebtEstimateEngine.estimate(from, to, FiqhEvaluationContext(
-                gender,
-                periods.map { RecordedPeriod(it.kind, LocalDate.parse(it.startDate), LocalDate.parse(it.endDate)) }
-            ))
+    val estimatePreviewResult by produceState<Result<DebtEstimate>?>(null, start, end, calendar, timezoneId, gender, periods) {
+        value = null
+        if (start.isNotBlank()) {
+            delay(200)
+            value = withContext(Dispatchers.Default) {
+                runCatching {
+                    val today = CalendarDates.today(timezoneId)
+                    val from = parseCalendarInput(start, calendar)
+                    val to = end.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar) } ?: today
+                    require(!from.isAfter(today) && !to.isAfter(today)) { "بازه برآورد نمی‌تواند شامل تاریخ آینده باشد" }
+                    DebtEstimateEngine.estimate(from, to, FiqhEvaluationContext(
+                        gender,
+                        periods.map { RecordedPeriod(it.kind, LocalDate.parse(it.startDate), LocalDate.parse(it.endDate)) }
+                    ))
+                }
+            }
         }
-    }.getOrNull()
+    }
+    val estimatePreview = estimatePreviewResult?.getOrNull()
     val rawPrayerEstimate = estimatePreview?.prayerUnitsByType?.get(PrayerType.FAJR) ?: 0
     val rawFastingEstimate = estimatePreview?.fastingDays ?: 0
 
@@ -234,6 +246,9 @@ fun ProfileScreen(
                     }, modifier = Modifier.fillMaxWidth()) { Text("اعمال برآورد خام و حفظ سوابق") }
                 }
             }
+        }
+        if (start.isNotBlank() && estimatePreviewResult?.isFailure == true) {
+            item { Text(estimatePreviewResult?.exceptionOrNull()?.message ?: "تاریخ‌های بازه برآورد معتبر نیستند.", color = MaterialTheme.colorScheme.error) }
         }
         if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
         item {

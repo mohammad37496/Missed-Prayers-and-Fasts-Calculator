@@ -38,6 +38,9 @@ class DebtRepository(private val database: AppDatabase) {
         ZoneId.of(profile.timezoneId)
         val start = profile.taklifStartDate?.let(LocalDate::parse)
         val end = profile.taklifEndDate?.let(LocalDate::parse)
+        val today = LocalDate.now(ZoneId.of(profile.timezoneId))
+        require(start == null || !start.isAfter(today)) { "تاریخ شروع برآورد نمی‌تواند در آینده باشد" }
+        require(end == null || !end.isAfter(today)) { "تاریخ پایان برآورد نمی‌تواند در آینده باشد" }
         require(start == null || end == null || !end.isBefore(start))
     }
 
@@ -122,11 +125,13 @@ class DebtRepository(private val database: AppDatabase) {
         PrayerType.entries.forEach { type ->
             val existing = dao.getPrayer(type.name)
             val completed = existing?.completed ?: 0
-            dao.savePrayer(PrayerDebtEntity(type.name, maxOf(prayerPerType, completed), completed, now))
+            // A profile re-estimate may raise a total, but must never erase a larger
+            // manually entered debt without an explicit adjustment operation.
+            dao.savePrayer(PrayerDebtEntity(type.name, maxOf(prayerPerType, completed, existing?.total ?: 0), completed, now))
         }
         val existingFast = dao.getFasting()
         val completedFast = existingFast?.completed ?: 0
-        dao.saveFasting(FastingDebtEntity(total = maxOf(fastingDays, completedFast), completed = completedFast, updatedAt = now))
+        dao.saveFasting(FastingDebtEntity(total = maxOf(fastingDays, completedFast, existingFast?.total ?: 0), completed = completedFast, updatedAt = now))
     }
 
     suspend fun recordPrayer(type: PrayerType, amount: Int = 1) {
