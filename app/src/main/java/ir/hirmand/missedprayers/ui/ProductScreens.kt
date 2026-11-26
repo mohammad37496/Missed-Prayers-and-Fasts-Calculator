@@ -356,7 +356,21 @@ fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, 
                 "ADJUSTMENT" -> record.kind.endsWith("ADJUSTMENT")
                 else -> true
             }
-            matchesFilter && (record.kind.contains(search, true) || record.reference.contains(search, true) || record.createdAt.toString().contains(search))
+            val localizedReference = when (record.reference) {
+                "FAJR" -> "صبح فجر"
+                "DHUHR" -> "ظهر"
+                "ASR" -> "عصر"
+                "MAGHRIB" -> "مغرب"
+                "ISHA" -> "عشا"
+                "FASTING" -> "روزه"
+                else -> record.reference
+            }
+            val localizedKind = if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "ثبت انجام"
+            matchesFilter && (
+                record.kind.contains(search, true) || record.reference.contains(search, true) ||
+                    localizedReference.contains(search, true) || localizedKind.contains(search, true) ||
+                    record.createdAt.toString().contains(search)
+                )
         }, key = { it.id }) { record ->
             val category = if (record.reference == "FASTING") "روزه" else "نماز ${PrayerType.entries.firstOrNull { it.name == record.reference }?.title ?: record.reference}"
             val kindLabel = if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "ثبت انجام‌شده"
