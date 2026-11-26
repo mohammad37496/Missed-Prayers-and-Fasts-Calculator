@@ -7,11 +7,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -131,6 +134,66 @@ class EncryptedBackupIntegrationTest {
         assertEquals(true, result.fromCache)
         assertEquals(cached, result.verse)
         assertEquals(null, result.message)
+    }
+
+    @Test fun dailyVerseLoadsOfficialPersianTafsirWithSourceVersion() = runBlocking {
+        val translations = JSONArray().put(
+            JSONObject().put("key", "persian_ih").put("title", "ترجمه فارسی - مرکز ترجمه رواد").put("version", "1.1.3")
+        )
+        val tafsirs = JSONArray().put(
+            JSONObject().put("key", "persian_saadi").put("title", "ترجمه فارسی - تفسیر سعدی")
+                .put("version", "1.0.0").put("language_iso_code", "fa")
+        )
+        val contentProvider = object : QuranEncContentProvider {
+            override fun listTranslations() = translations
+            override fun listTafsirs() = tafsirs
+            override fun translationForSurah(key: String, surah: Int) = JSONArray().put(
+                JSONObject().put("id", "1").put("sura", surah.toString()).put("aya", "1").put("translation", "ترجمه معتبر")
+            )
+            override fun tafsirForAyah(key: String, surah: Int, ayah: Int) = JSONArray()
+                .put(JSONObject().put("type", "المقطع").put("from_aya", 1).put("to_aya", 7).put("text", "متن عمومی سوره"))
+                .put(JSONObject().put("type", "تفسير آية").put("from_aya", 1).put("to_aya", 1).put("text", "تفسیر دقیق آیه"))
+        }
+        val repository = QuranContentRepository(
+            database.debtDao(), TanzilAssetTextProvider(context.assets), contentProvider = contentProvider
+        )
+
+        val result = repository.loadFor(LocalDate.parse("2026-11-26"), forceRefresh = true)
+
+        assertEquals("تفسیر دقیق آیه", result.verse?.tafsirText)
+        assertTrue(result.verse?.tafsirSource?.contains("QuranEnc.com · نسخه 1.0.0") == true)
+    }
+
+    @Test fun optionalTafsirServiceFailureDoesNotEraseCachedTafsir() = runBlocking {
+        val date = LocalDate.parse("2026-11-26")
+        database.debtDao().saveDailyVerse(
+            DailyVerseEntity(
+                dayKey = date.toString(), surah = 102, ayah = 1, globalNumber = 1,
+                arabicText = "متن عربی قبلی", persianTranslation = "ترجمه قبلی",
+                translationSource = "QuranEnc", translationVersion = "1.1.3",
+                tafsirText = "تفسیر ذخیره‌شده", tafsirSource = "QuranEnc.com · نسخه 1.0.0",
+                recitationUrl = null, reciterName = null, fetchedAt = 1_000L
+            )
+        )
+        val contentProvider = object : QuranEncContentProvider {
+            override fun listTranslations() = JSONArray().put(
+                JSONObject().put("key", "persian_ih").put("title", "ترجمه فارسی - مرکز ترجمه رواد").put("version", "1.1.3")
+            )
+            override fun listTafsirs(): JSONArray = error("سرویس تفسیر موقتاً در دسترس نیست")
+            override fun translationForSurah(key: String, surah: Int) = JSONArray().put(
+                JSONObject().put("id", "1").put("sura", surah.toString()).put("aya", "1").put("translation", "ترجمه تازه")
+            )
+            override fun tafsirForAyah(key: String, surah: Int, ayah: Int): JSONArray = error("نباید فراخوانی شود")
+        }
+        val repository = QuranContentRepository(
+            database.debtDao(), TanzilAssetTextProvider(context.assets), contentProvider = contentProvider
+        )
+
+        val result = repository.loadFor(date, forceRefresh = true)
+
+        assertEquals("ترجمه تازه", result.verse?.persianTranslation)
+        assertEquals("تفسیر ذخیره‌شده", result.verse?.tafsirText)
+        assertEquals("QuranEnc.com · نسخه 1.0.0", result.verse?.tafsirSource)
     }
 
     @Test fun changingProfileAndEstimatePreservesExcuseHistoryAndCompletedCounts() = runBlocking {

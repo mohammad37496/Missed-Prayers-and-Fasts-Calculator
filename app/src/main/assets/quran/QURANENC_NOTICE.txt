@@ -1,0 +1,25 @@
+QuranEnc.com content attribution and republication conditions
+
+Sources used by the app:
+- Persian translation: Rowwad Translation Center, key persian_ih, version 1.1.3 at integration time.
+- Persian Tafsir As-Saadi: key persian_saadi, version 1.0.0 at integration time.
+- Publisher/source: QuranEnc.com (Encyclopedia of the Noble Quran).
+
+Official source pages and API:
+- https://quranenc.com/en/browse/persian_ih
+- https://quranenc.com/en/browse/persian_saadi
+- https://quranenc.com/api/v1/translations/list/fa?localization=fa
+- https://quranenc.com/api/v1/tafsirs/list/fa?localization=fa
+
+QuranEnc's published reuse conditions require:
+1. No modification, addition, or deletion of the content.
+2. Clearly identifying the publisher and source (QuranEnc.com).
+3. Stating the version number when republishing.
+4. Keeping the transcript information with the content.
+5. Reporting notes/corrections to the source.
+6. Updating republished content to the latest version issued by QuranEnc.com.
+7. Not displaying inappropriate advertisements alongside Quran translations.
+
+The app displays the source and version supplied by the official API. Text is not
+rewritten or paraphrased. Version values above are the versions verified when
+the integration was implemented; the app reads current metadata at runtime.

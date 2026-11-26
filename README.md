@@ -21,7 +21,7 @@
 - راهنمای آفلاین برای ثبت بدهی، برنامه‌ریزی، تقویم، پشتیبان‌گیری و محدودیت‌های فقهی برنامه
 - Room schema version 5 با migrationهای افزایشی 1→2→3→4→5
 - SQLCipher Android 4.20.0 با کلید تصادفی دیتابیس محافظت‌شده توسط Android Keystore و AES-GCM؛ Android Auto Backup و Device Transfer غیرفعال‌اند
-- آیه روز واقعی: متن عربی بدون تغییر از Tanzil Uthmani v1.1 و ترجمه فارسی Rowwad از QuranEnc؛ مشخصات منبع/نسخه نمایش داده می‌شود و تفسیر As-Saadi فقط در صورت وجود در فهرست رسمی API نمایش داده می‌شود
+- آیه روز واقعی: متن عربی بدون تغییر از Tanzil Uthmani v1.1، ترجمه فارسی Rowwad از QuranEnc و تفسیر فارسی As-Saadi از endpoint مستقل Tafsir؛ منبع و نسخه هر دو متن نمایش داده می‌شوند
 - cache محلی آیه روز برای استفاده آفلاین؛ هنگام بازشدن برنامه ابتدا نسخه محلی نمایش داده می‌شود و سپس در پس‌زمینه به‌روزرسانی می‌شود؛ خطای شبکه نسخه cache‌شده را حفظ می‌کند
 - GitHub Actions workflow برای تست واحد، ساخت APK و اجرای instrumentation روی Android 16 emulator
 
@@ -41,7 +41,7 @@
 
 - متن عربی: Tanzil Quran Text Uthmani v1.1، فایل اصلی در `app/src/main/assets/quran/tanzil_uthmani_v1.1.txt` بدون تغییر نگهداری شده است. مجوز CC BY 3.0 و شروط کپی verbatim/no modification در `TANZIL_NOTICE.txt` کنار فایل درج شده است. منبع و به‌روزرسانی: https://tanzil.net/download/ و https://tanzil.net/updates/.
 - ترجمه فارسی: Rowwad Translation Center از QuranEnc؛ متن ترجمه بدون بازنویسی نمایش داده می‌شود و عنوان/نسخه/منبع در UI ذکر می‌شود. API: https://quranenc.com/fa/home/api .
-- تفسیر: تنها در صورت شناسایی نسخه فارسی As-Saadi در فهرست رسمی QuranEnc درخواست می‌شود؛ در غیر این صورت برنامه صریحاً اعلام می‌کند که فقط ترجمه در دسترس است.
+- تفسیر فارسی: Tafsir As-Saadi، کلید `persian_saadi`، نسخه رسمی API برابر 1.0.0 در زمان اتصال؛ فهرست تفاسیر از `/api/v1/tafsirs/list/fa` و متن آیه از `/api/v1/tafsir/aya/{key}/{sura}/{aya}` دریافت می‌شود. فقط بلوک دقیق همان آیه نمایش داده می‌شود؛ source/version و شروط بازنشر در `app/src/main/assets/quran/QURANENC_NOTICE.txt` ثبت شده‌اند.
 - تلاوت: اتصال امن Quran Foundation هنوز نیازمند backend و credentials است؛ مستندات: https://api-docs.quran.com/docs/content_apis_versioned/4.0.0/chapter-reciter-audio-file/ و شرایط: https://api-docs.quran.com/legal/developer-terms/ .
 - حدیث: مستندات API رسمی و نیاز به کلید: https://sunnah.com/developers .
 
