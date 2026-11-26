@@ -32,7 +32,7 @@ jobs:
           packages: platform-tools
 
       - name: Install Android platform
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Run unit tests, compile instrumentation and assemble debug/release APKs
         run: ./gradlew --no-daemon testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug assembleRelease lint
@@ -43,10 +43,10 @@ jobs:
           if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; fi
           if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
             echo "tcg=false" >> "$GITHUB_OUTPUT"
-            echo "KVM available; Android 17 emulator will use hardware acceleration."
+            echo "KVM available; Android 16 emulator will use hardware acceleration."
           else
             echo "tcg=true" >> "$GITHUB_OUTPUT"
-            echo "KVM unavailable; use the Android 17 image with TCG for the runtime test."
+            echo "KVM unavailable; use the Android 15 image with TCG for the runtime test."
           fi
 
       - name: Run instrumentation tests on Android emulator
@@ -54,7 +54,7 @@ jobs:
         env:
           ANDROID_I_WANT_MY_TCG: ${{ steps.emulator-accel.outputs.tcg == 'true' && 'yes' || '' }}
         with:
-          api-level: 37
+          api-level: ${{ steps.emulator-accel.outputs.tcg == 'true' && '35' || '36' }}
           target: google_apis
           arch: x86_64
           profile: pixel_2

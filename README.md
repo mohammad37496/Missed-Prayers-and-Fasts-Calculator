@@ -28,7 +28,7 @@
 - SQLCipher Android 4.20.0 با کلید تصادفی دیتابیس محافظت‌شده توسط Android Keystore و AES-GCM؛ Android Auto Backup و Device Transfer غیرفعال‌اند
 - آیه روز واقعی: متن عربی بدون تغییر از Tanzil Uthmani v1.1 و ترجمه فارسی Rowwad از QuranEnc با پانوشت‌های اصلی مترجم به‌صورت عیناً حفظ‌شده. تفسیر فارسی As-Saadi فقط در build توسعه (debug) قابل مشاهده است؛ در build انتشار دریافت، نمایش، ورود از backup و خروج به backup آن غیرفعال است تا شرایط اختصاصی بازنشر از ناشر تأیید شود.
 - cache محلی آیه روز برای استفاده آفلاین؛ هنگام بازشدن برنامه ابتدا نسخه محلی نمایش داده می‌شود و سپس در پس‌زمینه به‌روزرسانی می‌شود؛ اگر فقط آیه روزهای قبل cache شده باشد، تاریخ آن صریحاً نمایش داده می‌شود و به‌عنوان آیه امروز جا زده نمی‌شود
-- GitHub Actions workflow برای تست واحد، ساخت APK و اجرای instrumentation روی Android 17 (API 37)؛ در صورت دسترسی runner به KVM از شتاب سخت‌افزاری و در غیر این صورت از TCG روی همان API 37 استفاده می‌شود.
+- GitHub Actions workflow برای تست واحد، ساخت APK و اجرای instrumentation روی Android 16 (API 36)؛ در صورت دسترسی runner به KVM از شتاب سخت‌افزاری استفاده می‌شود و در نبود KVM به Android 15 (API 35) + TCG برمی‌گردد، چون Android 16 + TCG در runner فعلی ADB property fetch را پاسخ نمی‌دهد. API 37 هنوز در مخزن رسمی SDK قابل دریافت نیست.
 
 ### مواردی که عمداً فعال نشده‌اند
 
@@ -65,7 +65,7 @@
 
 ## ساخت و آزمون
 
-JDK 17 لازم است. Android SDK Platform 37 و Build Tools 36.0.0 باید نصب باشند. مسیر SDK محلی در `local.properties` تنظیم می‌شود و این فایل نباید commit شود.
+JDK 17 لازم است. Android SDK Platform 36 و Build Tools 36.0.0 باید نصب باشند. مسیر SDK محلی در `local.properties` تنظیم می‌شود و این فایل نباید commit شود.
 
 ```powershell
 ./gradlew.bat testDebugUnitTest
@@ -80,8 +80,8 @@ APK دیباگ: `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## محدودیت‌های اعتبارسنجی فعلی
 
-- آخرین clean build محلی روی JDK 17 با Gradle 9.9.2 موفق بوده است: ۳۰ تست واحد موفق، صفر شکست/skip، compile instrumentation، assembleDebug، assembleRelease و صفر یافته Lint.
-- اجرای CI شماره 45887193822 روی SHA قبلی `f37b148d94452cf12acf17b6e92b8c0496b4c5ed`، ۴۳ تست instrumentation را روی Android 16 emulator با ۴۳ موفق و صفر شکست/خطا/skip اجرا کرد. تغییرات فعلی شامل دو تست instrumentation تازه و ارتقای هدف به API 37 است؛ اجرای runtime روی SHA نهایی هنوز باید در CI تأیید شود.
-- targetSdk/compileSdk فعلی 37 است؛ آزمون واقعی TalkBack، فونت ۲۰۰٪، تبلت و Foldable همچنان نیازمند پذیرش دستی روی دستگاه‌های مربوط است.
+- آخرین clean build محلی روی JDK 17 با Gradle 9.9.2 موفق بوده است: ۳۰ تست واحد موفق، صفر شکست/skip، compile instrumentation، assembleDebug، assembleRelease و صفر خطای Lint. شش advisory باقی است: پیشنهاد target/compileSdk 37 و Core 1.19.1/Lifecycle 2.11.1؛ این نسخه‌ها در حال حاضر به API 37 نیاز دارند که از مخزن رسمی CI قابل دریافت نیست، بنابراین API 36 و وابستگی‌های سازگار حفظ شده‌اند.
+- اجرای CI شماره 45887193822 روی SHA قبلی `f37b148d94452cf12acf17b6e92b8c0496b4c5ed`، ۴۳ تست instrumentation را روی Android 16 emulator با ۴۳ موفق و صفر شکست/خطا/skip اجرا کرد. تغییرات فعلی شامل سه تست instrumentation تازه است؛ اجرای runtime روی SHA نهایی هنوز باید در CI تأیید شود.
+- targetSdk/compileSdk فعلی 36 است؛ API 37 هنوز از مخزن رسمی SDK در دسترس نیست. آزمون واقعی TalkBack، فونت ۲۰۰٪، تبلت و Foldable همچنان نیازمند پذیرش دستی روی دستگاه‌های مربوط است.
 - زمان‌بندی WorkManager دقیق/AlarmClock نیست و سیستم‌عامل ممکن است اعلان را در حالت Doze یا Battery Saver به تأخیر بیندازد.
 - این پروژه هنوز برای انتشار عمومی/فروشگاهی تأیید یا منتشر نشده است.

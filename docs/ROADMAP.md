@@ -23,7 +23,7 @@
 
 ### دروازه‌های لازم برای بستن فاز اول
 
-- [ ] اجرای موفق instrumentation runtime روی Android 17 (API 37) emulator با KVM یا TCG؛ تغییر targetSdk به 37 باید روی همان API runtime تأیید شود
+- [ ] اجرای موفق instrumentation runtime روی Android 16 (API 36) emulator با KVM؛ در runner بدون KVM از Android 15 (API 35) + TCG استفاده می‌شود، زیرا Android 16 + TCG در runner فعلی ADB property fetch را پاسخ نمی‌دهد
 - [ ] آزمون دستی نصب و جریان‌های onboarding، ثبت/undo، تاریخچه، تقویم، برنامه‌ریز، اعلان و backup/restore روی دستگاه واقعی
 - [ ] آزمون نمایشگر تبلت/فولد، تغییر اندازه پنجره، اندازه فونت بزرگ، TalkBack و کنتراست/معنای کنترل‌ها
 - [ ] بازبینی نهایی امنیت و بازیابی فایل خراب/ناسازگار، از جمله چرخه عمر کلید و recovery پس از خرابی دیتابیس
