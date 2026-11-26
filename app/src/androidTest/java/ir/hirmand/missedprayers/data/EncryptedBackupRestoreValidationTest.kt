@@ -36,6 +36,15 @@ class EncryptedBackupRestoreValidationTest {
 
     @After fun tearDown() { database.close() }
 
+    @Test fun closingDatabaseWipesRetainedSqlCipherPassphrase() {
+        val passphrase = byteArrayOf(11, 22, 33, 44, 55)
+        database.retainSqlCipherPassphrase(passphrase)
+
+        database.close()
+
+        assertArrayEquals(ByteArray(passphrase.size), passphrase)
+    }
+
     @Test fun profileReestimateNeverSilentlyLowersPreviouslyEnteredDebtTotals() = runBlocking {
         val dao = database.debtDao()
         val now = System.currentTimeMillis()

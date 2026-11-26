@@ -18,7 +18,7 @@ abstract class AppDatabase : RoomDatabase() {
 
     @Volatile private var sqlCipherPassphrase: ByteArray? = null
 
-    private fun retainSqlCipherPassphrase(passphrase: ByteArray) {
+    internal fun retainSqlCipherPassphrase(passphrase: ByteArray) {
         sqlCipherPassphrase = passphrase
     }
 

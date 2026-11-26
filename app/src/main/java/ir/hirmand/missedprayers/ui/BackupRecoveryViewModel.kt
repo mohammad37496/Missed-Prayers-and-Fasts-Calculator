@@ -66,7 +66,7 @@ class BackupRecoveryViewModel : ViewModel() {
             }
         }
         // Completion handlers also run when cancellation happens before the coroutine body starts.
-        restoreJob.invokeOnCompletion { password.fill('\u0000') }
+        restoreJob.wipeOnCompletion(password)
     }
 
     fun consumeCompletion() {

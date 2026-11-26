@@ -91,7 +91,7 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
         _backupStatus.value = status
     }.also { job ->
         // The body may never start when the scope is already cancelled; this still wipes the hand-off bytes.
-        job.invokeOnCompletion { bytes.fill(0) }
+        job.wipeOnCompletion(bytes)
     }
 
     fun restoreBackupFromUri(contentResolver: ContentResolver, uri: Uri, password: CharArray) = viewModelScope.launch(Dispatchers.IO) {
@@ -122,7 +122,7 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
         }
     }.also { job ->
         // The body may never start when the scope is already cancelled; this still wipes the hand-off password.
-        job.invokeOnCompletion { password.fill('\u0000') }
+        job.wipeOnCompletion(password)
     }
 
     suspend fun refreshDailyVerse(date: LocalDate) {
