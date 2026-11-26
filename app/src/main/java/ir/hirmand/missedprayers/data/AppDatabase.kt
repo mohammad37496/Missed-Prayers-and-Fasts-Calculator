@@ -17,6 +17,11 @@ abstract class AppDatabase : RoomDatabase() {
         private const val DATABASE_NAME = "missed_worship.db"
         @Volatile private var instance: AppDatabase? = null
 
+        init {
+            // WorkManager may open the encrypted database before MainActivity is created.
+            System.loadLibrary("sqlcipher")
+        }
+
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             val databaseFile = context.getDatabasePath(DATABASE_NAME)
             val existingDatabase = databaseFile.exists() || File(databaseFile.path + "-wal").exists() || File(databaseFile.path + "-shm").exists()

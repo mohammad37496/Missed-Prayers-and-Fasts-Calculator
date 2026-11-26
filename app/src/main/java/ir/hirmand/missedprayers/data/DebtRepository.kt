@@ -3,6 +3,7 @@ package ir.hirmand.missedprayers.data
 import androidx.room.withTransaction
 import ir.hirmand.missedprayers.domain.PrayerType
 import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 
 class DebtRepository(private val database: AppDatabase) {
@@ -17,12 +18,31 @@ class DebtRepository(private val database: AppDatabase) {
     val fiqhPreferences: Flow<FiqhPreferencesEntity?> = dao.observeFiqhPreferences()
 
     suspend fun saveProfile(profile: UserProfileEntity) {
+        validateProfile(profile)
+        dao.saveProfile(profile)
+    }
+
+    suspend fun saveProfileAndApplyRawDateEstimate(profile: UserProfileEntity, prayerPerType: Int, fastingDays: Int) {
+        validateProfile(profile)
+        validateRawEstimate(prayerPerType, fastingDays)
+        database.withTransaction {
+            dao.saveProfile(profile)
+            applyRawDateEstimateInTransaction(prayerPerType, fastingDays)
+        }
+    }
+
+    private fun validateProfile(profile: UserProfileEntity) {
         require(profile.gender in setOf("UNSPECIFIED", "WOMAN", "MAN", "PREFER_NOT_TO_SAY"))
         require(profile.calendarPreference in setOf("PERSIAN", "GREGORIAN", "ISLAMIC_CIVIL"))
+        require(profile.timezoneId.isNotBlank())
+        ZoneId.of(profile.timezoneId)
         val start = profile.taklifStartDate?.let(LocalDate::parse)
         val end = profile.taklifEndDate?.let(LocalDate::parse)
         require(start == null || end == null || !end.isBefore(start))
-        dao.saveProfile(profile)
+    }
+
+    private fun validateRawEstimate(prayerPerType: Int, fastingDays: Int) {
+        require(prayerPerType >= 0 && fastingDays >= 0)
     }
 
     suspend fun addExcusePeriod(kind: String, start: LocalDate, end: LocalDate, note: String?) {
@@ -91,18 +111,22 @@ class DebtRepository(private val database: AppDatabase) {
     }
 
     suspend fun applyRawDateEstimate(prayerPerType: Int, fastingDays: Int) {
-        require(prayerPerType >= 0 && fastingDays >= 0)
+        validateRawEstimate(prayerPerType, fastingDays)
         database.withTransaction {
-            val now = System.currentTimeMillis()
-            PrayerType.entries.forEach { type ->
-                val existing = dao.getPrayer(type.name)
-                val completed = existing?.completed ?: 0
-                dao.savePrayer(PrayerDebtEntity(type.name, maxOf(prayerPerType, completed), completed, now))
-            }
-            val existingFast = dao.getFasting()
-            val completedFast = existingFast?.completed ?: 0
-            dao.saveFasting(FastingDebtEntity(total = maxOf(fastingDays, completedFast), completed = completedFast, updatedAt = now))
+            applyRawDateEstimateInTransaction(prayerPerType, fastingDays)
         }
+    }
+
+    private suspend fun applyRawDateEstimateInTransaction(prayerPerType: Int, fastingDays: Int) {
+        val now = System.currentTimeMillis()
+        PrayerType.entries.forEach { type ->
+            val existing = dao.getPrayer(type.name)
+            val completed = existing?.completed ?: 0
+            dao.savePrayer(PrayerDebtEntity(type.name, maxOf(prayerPerType, completed), completed, now))
+        }
+        val existingFast = dao.getFasting()
+        val completedFast = existingFast?.completed ?: 0
+        dao.saveFasting(FastingDebtEntity(total = maxOf(fastingDays, completedFast), completed = completedFast, updatedAt = now))
     }
 
     suspend fun recordPrayer(type: PrayerType, amount: Int = 1) {

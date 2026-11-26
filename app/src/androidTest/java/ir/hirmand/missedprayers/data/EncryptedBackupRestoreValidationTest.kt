@@ -10,6 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
@@ -71,6 +72,50 @@ class EncryptedBackupRestoreValidationTest {
             assertEquals(4, dao.getFasting()?.completed)
             assertEquals("WOMAN", dao.getProfileSnapshot()?.gender)
         }
+    }
+
+    @Test fun databaseFailureDuringRestoreRollsBackEveryClearedTable() = runBlocking {
+        val dao = database.debtDao()
+        dao.savePrayer(PrayerDebtEntity("FAJR", 30, 8, 1_000L))
+        dao.saveProfile(
+            UserProfileEntity(
+                displayName = "Backup profile",
+                gender = "WOMAN",
+                taklifStartDate = "2010-01-01",
+                taklifEndDate = null,
+                timezoneId = "Asia/Tehran",
+                calendarPreference = "PERSIAN",
+                marjaId = null,
+                updatedAt = 1_000L
+            )
+        )
+        val manager = EncryptedBackupManager(database)
+        val backup = manager.createBackup("restore-atomicity-password".toCharArray())
+
+        dao.savePrayer(PrayerDebtEntity("FAJR", 40, 9, 2_000L))
+        dao.saveProfile(
+            UserProfileEntity(
+                displayName = "Current profile",
+                gender = "MAN",
+                taklifStartDate = "2000-01-01",
+                taklifEndDate = null,
+                timezoneId = "Europe/Oslo",
+                calendarPreference = "GREGORIAN",
+                marjaId = null,
+                updatedAt = 2_000L
+            )
+        )
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_profile_restore BEFORE INSERT ON user_profile BEGIN SELECT RAISE(ABORT, 'forced restore failure'); END"
+        )
+
+        assertThrows(RuntimeException::class.java) {
+            runBlocking { manager.restoreBackup(backup, "restore-atomicity-password".toCharArray()) }
+        }
+
+        assertEquals(9, dao.getPrayer("FAJR")?.completed)
+        assertEquals("Current profile", dao.getProfileSnapshot()?.displayName)
+        assertEquals("MAN", dao.getProfileSnapshot()?.gender)
     }
 
     @Test fun previousDaysVerseIsMarkedStaleWhenTodayCannotBeFetched() = runBlocking {
@@ -135,5 +180,71 @@ class EncryptedBackupRestoreValidationTest {
             runCatching { incorrect.close() }
             context.deleteDatabase(name)
         }
+    }
+
+    @Test fun missingKeyEnvelopeForExistingDatabaseFailsClosedWithoutGeneratingANewKey() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val databaseName = "restore-validation-missing-key.db"
+        val preferencesName = "restore-validation-missing-key"
+        context.deleteDatabase(databaseName)
+        context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE).edit().clear().commit()
+        context.getDatabasePath(databaseName).apply {
+            parentFile?.mkdirs()
+            writeBytes(byteArrayOf(1, 2, 3, 4))
+        }
+        val provider = DatabaseKeyProvider(
+            context,
+            preferencesName = preferencesName,
+            keyAlias = "restore_validation_missing_key_alias",
+            requireExistingDatabaseKey = true
+        )
+
+        try {
+            assertThrows(IllegalStateException::class.java) { provider.getOrCreatePassphrase() }
+            assertNull(context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE).getString("encrypted_passphrase", null))
+        } finally {
+            context.deleteDatabase(databaseName)
+            context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE).edit().clear().commit()
+        }
+    }
+
+    @Test fun profileAndEstimateChangesRollbackTogetherWhenDebtWriteFails() = runBlocking {
+        val dao = database.debtDao()
+        val repository = DebtRepository(database)
+        dao.saveProfile(
+            UserProfileEntity(
+                displayName = "Original profile",
+                gender = "WOMAN",
+                taklifStartDate = "2010-01-01",
+                taklifEndDate = null,
+                timezoneId = "Asia/Tehran",
+                calendarPreference = "PERSIAN",
+                marjaId = null,
+                updatedAt = 1_000L
+            )
+        )
+        dao.savePrayer(PrayerDebtEntity("FAJR", 40, 10, 1_000L))
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER fail_estimate_write BEFORE INSERT ON prayer_debts BEGIN SELECT RAISE(ABORT, 'forced estimate failure'); END"
+        )
+        val replacementProfile = UserProfileEntity(
+            displayName = "Replacement profile",
+            gender = "MAN",
+            taklifStartDate = "2000-01-01",
+            taklifEndDate = null,
+            timezoneId = "Europe/Oslo",
+            calendarPreference = "GREGORIAN",
+            marjaId = null,
+            updatedAt = 2_000L
+        )
+
+        assertThrows(RuntimeException::class.java) {
+            runBlocking { repository.saveProfileAndApplyRawDateEstimate(replacementProfile, 50, 30) }
+        }
+
+        assertEquals("Original profile", dao.getProfileSnapshot()?.displayName)
+        assertEquals("WOMAN", dao.getProfileSnapshot()?.gender)
+        assertEquals(40, dao.getPrayer("FAJR")?.total)
+        assertEquals(10, dao.getPrayer("FAJR")?.completed)
     }
 }

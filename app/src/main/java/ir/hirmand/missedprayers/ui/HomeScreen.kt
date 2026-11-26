@@ -53,8 +53,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.Duration
+import java.time.format.DateTimeFormatter
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -63,21 +67,35 @@ import androidx.compose.ui.unit.dp
 import ir.hirmand.missedprayers.data.FastingDebtEntity
 import ir.hirmand.missedprayers.data.PrayerDebtEntity
 import ir.hirmand.missedprayers.domain.PrayerType
+import ir.hirmand.missedprayers.domain.CalendarDates
 
 @Composable
 fun HomeScreen(viewModel: DebtViewModel) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val profile by viewModel.profile.collectAsState()
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(profile?.timezoneId) {
+        val zone = runCatching { ZoneId.of(profile?.timezoneId ?: ZoneId.systemDefault().id) }.getOrDefault(ZoneId.systemDefault())
+        while (true) {
+            val verseDate = CalendarDates.today(zone.id)
+            viewModel.refreshDailyVerse(verseDate)
+            val nextLocalMidnight = verseDate.plusDays(1).atStartOfDay(zone)
+            delay(Duration.between(ZonedDateTime.now(zone).toInstant(), nextLocalMidnight.toInstant()).toMillis().coerceAtLeast(1L))
+        }
+    }
     fun hasNotificationPermission(): Boolean {
         val runtimePermissionGranted = Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         return runtimePermissionGranted && NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
     var notificationPermissionGranted by remember { mutableStateOf(hasNotificationPermission()) }
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, profile?.timezoneId) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) notificationPermissionGranted = hasNotificationPermission()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationPermissionGranted = hasNotificationPermission()
+                scope.launch { viewModel.refreshDailyVerse(CalendarDates.today(profile?.timezoneId ?: ZoneId.systemDefault().id)) }
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -88,7 +106,6 @@ fun HomeScreen(viewModel: DebtViewModel) {
     var pendingBackup by remember { mutableStateOf<ByteArray?>(null) }
     var pendingImportPassword by remember { mutableStateOf<CharArray?>(null) }
     var backupStatus by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
     val createBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.hirmand.mwbk")) { uri ->
         val bytes = pendingBackup
         pendingBackup = null
@@ -130,10 +147,12 @@ fun HomeScreen(viewModel: DebtViewModel) {
     val prayers by viewModel.prayers.collectAsState()
     val fasting by viewModel.fasting.collectAsState()
     val recentRecords by viewModel.recentRecords.collectAsState()
+    val allRecords by viewModel.allRecords.collectAsState()
     val periods by viewModel.excusePeriods.collectAsState()
     val plannerSettings by viewModel.plannerSettings.collectAsState()
     val fiqhPreferences by viewModel.fiqhPreferences.collectAsState()
     val dailyVerse by viewModel.dailyVerse.collectAsState()
+    val localDataLoaded by viewModel.localDataLoaded.collectAsState()
     var showSetup by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember(profile) { mutableStateOf(if (profile == null) "profile" else "dashboard") }
@@ -149,7 +168,9 @@ fun HomeScreen(viewModel: DebtViewModel) {
     }
 
     CompositionDirectionRtl {
-        if (showSetup) {
+        if (!localDataLoaded) {
+            DatabaseLoadingScreen()
+        } else if (showSetup) {
             SetupScreen(
                 savedPrayers = prayers,
                 savedFasting = fasting,
@@ -203,13 +224,16 @@ fun HomeScreen(viewModel: DebtViewModel) {
                                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                         }
-                        "reports" -> ReportsScreen(prayers, fasting, viewModel.allRecords.collectAsState().value, profile?.calendarPreference ?: "PERSIAN")
+                        "reports" -> ReportsScreen(prayers, fasting, allRecords, profile?.calendarPreference ?: "PERSIAN", profile?.timezoneId)
                         "more" -> MoreScreen(onProfile = { selectedTab = "profile" }, onFiqh = { selectedTab = "settings" }, onBackup = { selectedTab = "backup" }, onHelp = { selectedTab = "help" })
                         "help" -> HelpScreen()
                         "profile" -> ProfileScreen(profile, periods, { value -> viewModel.saveProfile(value) { error = it } },
                             { kind, start, end, note -> viewModel.addExcusePeriod(kind, start, end, note) },
                             { id -> viewModel.deleteExcusePeriod(id) { error = it } },
-                            { prayerDays, fastingDays -> viewModel.applyRawDateEstimate(prayerDays, fastingDays) { error = it }; selectedTab = "dashboard" })
+                            { value, prayerDays, fastingDays ->
+                                viewModel.saveProfileAndApplyRawDateEstimate(value, prayerDays, fastingDays)
+                                selectedTab = "dashboard"
+                            })
                         "settings" -> SettingsScreen(fiqhPreferences, { viewModel.saveFiqhPreferences(it) { error = it } }) {
                             viewModel.deleteAllData { result ->
                                 if (result.isSuccess) {
@@ -228,8 +252,10 @@ fun HomeScreen(viewModel: DebtViewModel) {
                         else -> Dashboard(prayers, fasting, onRecordPrayer = { type, amount -> viewModel.recordPrayer(type, amount) { error = it } },
                             recentRecords = recentRecords,
                             dailyVerse = dailyVerse,
+                            timezoneId = profile?.timezoneId,
+                            calendarPreference = profile?.calendarPreference ?: "PERSIAN",
                             onRecordFasting = { amount -> viewModel.recordFasting(amount) { error = it } },
-                            onRefreshVerse = viewModel::refreshDailyVerse,
+                            onRefreshVerse = { scope.launch { viewModel.refreshDailyVerse(CalendarDates.today(profile?.timezoneId ?: ZoneId.systemDefault().id)) } },
                             onUndoRecord = { id -> viewModel.undoRecord(id) { error = it } },
                             onEdit = { showSetup = true })
                     }
@@ -303,10 +329,12 @@ private fun Dashboard(
     prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?,
     recentRecords: List<ir.hirmand.missedprayers.data.DebtRecordEntity>,
     dailyVerse: ir.hirmand.missedprayers.data.DailyVerseResult,
+    timezoneId: String?, calendarPreference: String,
     onRecordPrayer: (PrayerType, Int) -> Unit, onRecordFasting: (Int) -> Unit,
     onRefreshVerse: () -> Unit,
     onUndoRecord: (Long) -> Unit, onEdit: () -> Unit
 ) {
+    val zone = remember(timezoneId) { runCatching { ZoneId.of(timezoneId ?: ZoneId.systemDefault().id) }.getOrDefault(ZoneId.systemDefault()) }
     val prayerRemaining = prayers.sumOf { (it.total - it.completed).coerceAtLeast(0).toLong() }
     val fastRemaining = ((fasting?.total ?: 0) - (fasting?.completed ?: 0)).coerceAtLeast(0)
     val hasDebt = prayers.isNotEmpty() || fasting != null
@@ -350,7 +378,8 @@ private fun Dashboard(
                         Column(Modifier.weight(1f)) {
                             Text("$title · ${if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "${record.amount} مورد"}", fontWeight = FontWeight.Medium)
                             if (record.kind.endsWith("ADJUSTMENT")) Text("${record.beforeCompleted} ← ${record.afterCompleted}", style = MaterialTheme.typography.labelSmall)
-                            Text(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(record.createdAt)), style = MaterialTheme.typography.labelSmall)
+                            val localDateTime = java.time.Instant.ofEpochMilli(record.createdAt).atZone(zone)
+                            Text("${CalendarDates.displayPreferred(localDateTime.toLocalDate(), calendarPreference)} · ${localDateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}", style = MaterialTheme.typography.labelSmall)
                         }
                         OutlinedButton(onClick = { onUndoRecord(record.id) }) { Text("بازگردانی") }
                     }

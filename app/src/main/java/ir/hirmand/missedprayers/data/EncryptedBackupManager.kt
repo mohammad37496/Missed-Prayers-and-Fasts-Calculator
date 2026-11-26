@@ -23,12 +23,18 @@ class EncryptedBackupManager(private val database: AppDatabase) {
         payload.put("dailyVerses", JSONArray().also { array -> dao.getAllDailyVerses().forEach { array.put(JSONObject().put("dayKey", it.dayKey).put("surah", it.surah).put("ayah", it.ayah).put("globalNumber", it.globalNumber).put("arabicText", it.arabicText).put("persianTranslation", it.persianTranslation).put("translationSource", it.translationSource).put("translationVersion", it.translationVersion).put("tafsirText", it.tafsirText ?: JSONObject.NULL).put("tafsirSource", it.tafsirSource ?: JSONObject.NULL).put("recitationUrl", it.recitationUrl ?: JSONObject.NULL).put("reciterName", it.reciterName ?: JSONObject.NULL).put("fetchedAt", it.fetchedAt)) } })
         payload
         }
-        EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+        val plain = payload.toString().toByteArray(Charsets.UTF_8)
+        try {
+            EncryptedBackupCodec.encrypt(plain, password)
+        } finally {
+            plain.fill(0)
+        }
     }
 
     suspend fun restoreBackup(file: ByteArray, password: CharArray) = withContext(Dispatchers.IO) {
         require(file.size <= EncryptedBackupCodec.MAX_FILE_BYTES) { "فایل پشتیبان بیش از حد بزرگ است" }
         val plain = EncryptedBackupCodec.decrypt(file, password)
+        try {
         val root = JSONObject(plain.toString(Charsets.UTF_8))
         val backupVersion = root.getInt("schemaVersion")
         require(backupVersion in 4..5) { "نسخه ساختار فایل پشتیبان پشتیبانی نمی‌شود" }
@@ -115,6 +121,9 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             if (planner != null) dao.saveAllPlannerSettings(planner)
             if (fiqh != null) dao.saveAllFiqhPreferences(fiqh)
             if (verses.isNotEmpty()) dao.saveAllDailyVerses(verses)
+        }
+        } finally {
+            plain.fill(0)
         }
     }
 

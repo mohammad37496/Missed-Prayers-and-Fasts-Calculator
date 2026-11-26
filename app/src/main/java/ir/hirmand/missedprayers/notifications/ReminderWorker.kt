@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.first
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
 
 class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -68,14 +69,14 @@ object ReminderScheduler {
             return
         }
         val zone = runCatching { ZoneId.of(zoneId) }.getOrDefault(ZoneId.systemDefault())
-        val delay = nextDelayMillis(settings, LocalDateTime.now(zone))
+        val delay = nextDelayMillis(settings, ZonedDateTime.now(zone))
         enqueue(context, delay, ExistingWorkPolicy.REPLACE)
     }
 
     internal fun scheduleNext(context: Context, settings: PlannerSettingsEntity, zoneId: String = ZoneId.systemDefault().id) {
         if (!settings.reminderEnabled) return
         val zone = runCatching { ZoneId.of(zoneId) }.getOrDefault(ZoneId.systemDefault())
-        enqueue(context, nextDelayMillis(settings, LocalDateTime.now(zone)), ExistingWorkPolicy.APPEND_OR_REPLACE)
+        enqueue(context, nextDelayMillis(settings, ZonedDateTime.now(zone)), ExistingWorkPolicy.APPEND_OR_REPLACE)
     }
 
     private fun enqueue(context: Context, delay: Long, policy: ExistingWorkPolicy) {
@@ -83,14 +84,23 @@ object ReminderScheduler {
         WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK, policy, request)
     }
 
-    internal fun nextDelayMillis(settings: PlannerSettingsEntity, now: LocalDateTime): Long {
+    internal fun nextDelayMillis(settings: PlannerSettingsEntity, now: LocalDateTime): Long =
+        nextDelayMillis(settings, now.atZone(ZoneId.systemDefault()))
+
+    internal fun nextDelayMillis(settings: PlannerSettingsEntity, now: ZonedDateTime): Long {
         require(settings.activeWeekdaysMask in 1..127 && settings.reminderHour in 0..23 && settings.reminderMinute in 0..59)
         for (offset in 0..7) {
             val date = now.toLocalDate().plusDays(offset.toLong())
             val bit = 1 shl (date.dayOfWeek.value - 1)
             if (settings.activeWeekdaysMask and bit == 0) continue
-            val target = date.atTime(settings.reminderHour, settings.reminderMinute)
-            if (target.isAfter(now)) return Duration.between(now, target).toMillis().coerceAtLeast(1)
+            val localTarget = date.atTime(settings.reminderHour, settings.reminderMinute)
+            var target = localTarget.atZone(now.zone)
+            if (now.zone.rules.getValidOffsets(localTarget).size == 2 && !target.toInstant().isAfter(now.toInstant())) {
+                target = target.withLaterOffsetAtOverlap()
+            }
+            if (target.toInstant().isAfter(now.toInstant())) {
+                return Duration.between(now.toInstant(), target.toInstant()).toMillis().coerceAtLeast(1)
+            }
         }
         return Duration.ofDays(1).toMillis()
     }

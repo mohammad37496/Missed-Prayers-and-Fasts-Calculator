@@ -1,6 +1,7 @@
 package ir.hirmand.missedprayers.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -8,6 +9,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URI
 import java.time.LocalDate
+import java.io.ByteArrayOutputStream
+
+private const val MAX_QURANENC_RESPONSE_BYTES = 2 * 1024 * 1024
 
 data class DailyVerseResult(
     val verse: DailyVerseEntity?,
@@ -42,7 +46,22 @@ class HttpQuranEncContentProvider : QuranEncContentProvider {
             connection.setRequestProperty("User-Agent", "MissedWorshipCalculator/0.1 Android")
             val status = connection.responseCode
             if (status !in 200..299) error("سرویس محتوا پاسخ $status برگرداند")
-            val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            require(connection.contentLengthLong <= MAX_QURANENC_RESPONSE_BYTES || connection.contentLengthLong < 0) {
+                "پاسخ سرویس محتوا بیش از حد مجاز است"
+            }
+            val body = connection.inputStream.use { input ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(8 * 1024)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= MAX_QURANENC_RESPONSE_BYTES) { "پاسخ سرویس محتوا بیش از حد مجاز است" }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray().toString(Charsets.UTF_8)
+            }
             return JSONObject(body)
         } finally {
             connection.disconnect()
@@ -81,6 +100,7 @@ class QuranContentRepository(
             dao.pruneDailyVerses(date.minusDays(7).toString())
             DailyVerseResult(verse, false, null)
         } catch (error: Exception) {
+            if (error is CancellationException) throw error
             val cached = dao.getLatestDailyVerse()
             DailyVerseResult(
                 cached,
@@ -96,6 +116,10 @@ class QuranContentRepository(
         val translationMeta = findTranslation(catalogue, listOf("rowwad", "persian_ih"))
             ?: error("ترجمه فارسی دارای مشخصات منبع در فهرست QuranEnc پیدا نشد")
         val translationKey = translationMeta.getString("key")
+        val translationLanguage = translationMeta.optString("language_iso_code")
+        require(translationKey.matches(Regex("[a-z0-9_]{1,80}")) && (translationLanguage.isBlank() || translationLanguage == "fa")) {
+            "شناسه یا زبان ترجمه فارسی از منبع معتبر نیست"
+        }
         val translationTitle = translationMeta.optString("title", "QuranEnc")
         val translationVersion = translationMeta.optString("version", "نامشخص")
 
@@ -108,22 +132,23 @@ class QuranContentRepository(
             ?: error("شناسه سراسری آیه از منبع معتبر دریافت نشد")
         val surahNumber = selected.optString("sura").toIntOrNull() ?: surah
         val ayahNumber = selected.optString("aya").toIntOrNull() ?: (index + 1)
+        require(surahNumber in 1..114 && ayahNumber in 1..286) { "شماره سوره یا آیه از منبع معتبر نیست" }
         val arabic = arabicTextProvider.getAyah(surahNumber, ayahNumber)
         val translation = selected.optString("translation")
         require(!arabic.isNullOrBlank() && translation.isNotBlank()) { "متن آیه از Tanzil یا ترجمه فارسی از QuranEnc ناقص است" }
 
-        val tafsirMeta = runCatching { findTafsir(contentProvider.listTafsirs()) }.getOrNull()
+        val tafsirMeta = optionalContent { findTafsir(contentProvider.listTafsirs()) }
         val tafsir = tafsirMeta?.let { meta ->
-            runCatching {
+            optionalContent {
                 val tafsirKey = meta.getString("key")
                 val blocks = contentProvider.tafsirForAyah(tafsirKey, surahNumber, ayahNumber)
                 (0 until blocks.length()).map { blocks.getJSONObject(it) }.firstOrNull { block ->
                     block.optString("type").contains("تفسير آية") &&
                         block.optInt("from_aya", -1) == ayahNumber && block.optInt("to_aya", -1) == ayahNumber
                 }?.optString("text")?.takeIf(String::isNotBlank)
-            }.getOrNull()
+            }
         }
-        val audio = runCatching { recitationProvider.resolve(globalNumber) }.getOrNull()
+        val audio = optionalContent { recitationProvider.resolve(globalNumber) }
 
         return DailyVerseEntity(
             dayKey = date.toString(), surah = surahNumber, ayah = ayahNumber, globalNumber = globalNumber,
@@ -151,4 +176,13 @@ class QuranContentRepository(
         (0 until items.length()).map { items.getJSONObject(it) }.firstOrNull { item ->
             item.optString("key") == "persian_saadi" && item.optString("language_iso_code") == "fa"
         }
+
+    private suspend fun <T> optionalContent(block: suspend () -> T): T? = try {
+        block()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
+    }
+
 }

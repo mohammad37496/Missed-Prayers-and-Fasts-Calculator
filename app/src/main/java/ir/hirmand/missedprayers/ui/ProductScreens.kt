@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
@@ -34,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +55,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.AudioAttributes as PlayerAudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -76,6 +81,9 @@ import ir.hirmand.missedprayers.domain.PrayerType
 import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
+import java.time.Duration
+import java.time.ZonedDateTime
+import kotlinx.coroutines.delay
 import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -99,16 +107,16 @@ private fun formatCalendarInput(date: LocalDate, preference: String): String {
 }
 
 private fun reformatCalendarInput(value: String, from: String, to: String): String =
-    if (value.isBlank()) "" else runCatching { formatCalendarInput(parseCalendarInput(value, from), to) }.getOrDefault(value)
+    if (value.isBlank()) "" else formatCalendarInput(parseCalendarInput(value, from), to)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
     profile: UserProfileEntity?, periods: List<ExcusePeriodEntity>,
     onSave: (UserProfileEntity) -> Unit,
-    onAddPeriod: suspend (String, LocalDate, LocalDate, String?) -> Unit,
+    onAddPeriod: suspend (String, LocalDate, LocalDate, String?) -> Boolean,
     onDeletePeriod: (Long) -> Unit,
-    onApplyEstimate: (Int, Int) -> Unit
+    onApplyEstimate: suspend (UserProfileEntity, Int, Int) -> Unit
 ) {
     var name by remember(profile) { mutableStateOf(profile?.displayName.orEmpty()) }
     var gender by remember(profile) { mutableStateOf(profile?.gender ?: "UNSPECIFIED") }
@@ -160,11 +168,23 @@ fun ProfileScreen(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("PERSIAN" to "شمسی", "ISLAMIC_CIVIL" to "قمری محاسباتی", "GREGORIAN" to "میلادی").forEach { (value, label) ->
                     OutlinedButton(onClick = {
-                        start = reformatCalendarInput(start, calendar, value)
-                        end = reformatCalendarInput(end, calendar, value)
-                        periodStart = reformatCalendarInput(periodStart, calendar, value)
-                        periodEnd = reformatCalendarInput(periodEnd, calendar, value)
-                        calendar = value
+                        runCatching {
+                            listOf(
+                                reformatCalendarInput(start, calendar, value),
+                                reformatCalendarInput(end, calendar, value),
+                                reformatCalendarInput(periodStart, calendar, value),
+                                reformatCalendarInput(periodEnd, calendar, value)
+                            )
+                        }.onSuccess { converted ->
+                            start = converted[0]
+                            end = converted[1]
+                            periodStart = converted[2]
+                            periodEnd = converted[3]
+                            calendar = value
+                            error = null
+                        }.onFailure {
+                            error = "یکی از تاریخ‌ها در تقویم فعلی معتبر نیست؛ ابتدا آن را اصلاح کنید. تقویم تغییر نکرد."
+                        }
                     }) { Text(if (calendar == value) "✓ $label" else label) }
                 }
             }
@@ -189,8 +209,19 @@ fun ProfileScreen(
                     Text("روزه به تفکیک سال میلادی: ${estimatePreview.fastingDaysByGregorianYear.entries.joinToString(" · ") { "${it.key}: ${it.value}" }}", style = MaterialTheme.typography.bodySmall)
                     Text("روزهای نیازمند بررسی فقهی: نماز ${estimatePreview.prayerDaysNeedingReview} روز · روزه ${estimatePreview.fastingDaysNeedingReview} روز. روزهای عذر، تفاوت تکلیف روزه و قواعد مرجع هنوز اعمال نشده‌اند؛ هیچ حکم شرعی از این برآورد نتیجه نمی‌شود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     Button(onClick = {
-                        onSave(UserProfileEntity(displayName = name.ifBlank { null }, gender = gender, taklifStartDate = start.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }, taklifEndDate = end.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }, timezoneId = timezoneId, calendarPreference = calendar, marjaId = profile?.marjaId, updatedAt = System.currentTimeMillis()))
-                        onApplyEstimate(rawPrayerEstimate, rawFastingEstimate)
+                        val preparedProfile = runCatching {
+                            val startIso = start.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }
+                            val endIso = end.takeIf(String::isNotBlank)?.let { parseCalendarInput(it, calendar).toString() }
+                            ZoneId.of(timezoneId)
+                            UserProfileEntity(displayName = name.ifBlank { null }, gender = gender, taklifStartDate = startIso, taklifEndDate = endIso, timezoneId = timezoneId, calendarPreference = calendar, marjaId = profile?.marjaId, updatedAt = System.currentTimeMillis())
+                        }
+                        preparedProfile.onSuccess { value ->
+                            scope.launch {
+                                runCatching { onApplyEstimate(value, rawPrayerEstimate, rawFastingEstimate) }
+                                    .onSuccess { error = null }
+                                    .onFailure { error = it.message ?: "اعمال برآورد و ذخیره پروفایل انجام نشد؛ اطلاعات قبلی حفظ شده است." }
+                            }
+                        }.onFailure { error = "اطلاعات پروفایل یا تاریخ‌ها معتبر نیستند؛ هیچ تغییری اعمال نشد." }
                     }, modifier = Modifier.fillMaxWidth()) { Text("اعمال برآورد خام و حفظ سوابق") }
                 }
             }
@@ -206,14 +237,14 @@ fun ProfileScreen(
                             OutlinedButton(onClick = { periodKind = value }) { Text(if (periodKind == value) "✓ $label" else label) }
                         }
                     }
-                    OutlinedTextField(periodStart, { periodStart = it }, label = { Text("شروع YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(periodEnd, { periodEnd = it }, label = { Text("پایان YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(periodStart, { periodStart = it }, label = { Text("شروع ${calendarLabel(calendar)} YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(periodEnd, { periodEnd = it }, label = { Text("پایان ${calendarLabel(calendar)} YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
                     Button(onClick = {
                         val parsed = runCatching { parseCalendarInput(periodStart, calendar) to parseCalendarInput(periodEnd, calendar) }
                         parsed.onSuccess { (startDate, endDate) ->
                             scope.launch {
                                 runCatching { onAddPeriod(periodKind, startDate, endDate, null) }
-                                    .onSuccess { periodStart = ""; periodEnd = ""; error = null }
+                                    .onSuccess { added -> if (added) { periodStart = ""; periodEnd = ""; error = null } }
                                     .onFailure { error = it.message ?: "ثبت بازه انجام نشد؛ اطلاعات واردشده حفظ شده است." }
                             }
                         }.onFailure { error = "بازه تاریخ ${calendarLabel(calendar)} معتبر نیست یا پایان قبل از شروع است." }
@@ -298,8 +329,15 @@ fun PlannerScreen(
             }
         }
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = reminders, onCheckedChange = { reminders = it })
+            Row(
+                Modifier.fillMaxWidth().toggleable(
+                    value = reminders,
+                    role = Role.Checkbox,
+                    onValueChange = { reminders = it }
+                ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(checked = reminders, onCheckedChange = null)
                 Text("یادآوری روزانه فعال باشد")
             }
         }
@@ -390,20 +428,53 @@ fun CalendarScreen(profile: UserProfileEntity?) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>, calendarPreference: String = "PERSIAN") {
+fun ReportsScreen(
+    prayers: List<PrayerDebtEntity>,
+    fasting: FastingDebtEntity?,
+    records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>,
+    calendarPreference: String = "PERSIAN",
+    timezoneId: String? = null
+) {
     var search by remember { mutableStateOf("") }
     var recordFilter by remember { mutableStateOf("ALL") }
+    val zone = remember(timezoneId) { runCatching { ZoneId.of(timezoneId ?: ZoneId.systemDefault().id) }.getOrDefault(ZoneId.systemDefault()) }
     val prayerCompleted = prayers.sumOf { it.completed.toLong() }
     val prayerTotal = prayers.sumOf { it.total.toLong() }
     val fastingCompleted = fasting?.completed ?: 0
     val fastingTotal = fasting?.total ?: 0
+    val filteredRecords = records.filter { record ->
+        val matchesFilter = when (recordFilter) {
+            "PRAYER" -> record.reference != "FASTING"
+            "FASTING" -> record.reference == "FASTING"
+            "ADJUSTMENT" -> record.kind.endsWith("ADJUSTMENT")
+            else -> true
+        }
+        val localizedReference = when (record.reference) {
+            "FAJR" -> "صبح فجر"
+            "DHUHR" -> "ظهر"
+            "ASR" -> "عصر"
+            "MAGHRIB" -> "مغرب"
+            "ISHA" -> "عشا"
+            "FASTING" -> "روزه"
+            else -> record.reference
+        }
+        val localizedKind = if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "ثبت انجام"
+        val recordDate = runCatching { Instant.ofEpochMilli(record.createdAt).atZone(zone).toLocalDate() }.getOrNull()
+        val dateText = recordDate?.let { CalendarDates.displayPreferred(it, calendarPreference) }.orEmpty()
+        matchesFilter && (
+            record.kind.contains(search, true) || record.reference.contains(search, true) ||
+                localizedReference.contains(search, true) || localizedKind.contains(search, true) ||
+                record.createdAt.toString().contains(search) || recordDate?.toString()?.contains(search, true) == true ||
+                dateText.contains(search, true)
+            )
+    }
     LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("گزارش پیشرفت", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
         item { Text("نماز: $prayerCompleted از $prayerTotal انجام‌شده · ${ (prayerTotal - prayerCompleted).coerceAtLeast(0) } باقی‌مانده") }
         item { androidx.compose.material3.LinearProgressIndicator(progress = { if (prayerTotal == 0L) 0f else (prayerCompleted.toDouble() / prayerTotal).toFloat() }, modifier = Modifier.fillMaxWidth()) }
         item { Text("روزه: $fastingCompleted از $fastingTotal انجام‌شده · ${(fastingTotal - fastingCompleted).coerceAtLeast(0)} باقی‌مانده") }
         item { androidx.compose.material3.LinearProgressIndicator(progress = { if (fastingTotal == 0) 0f else fastingCompleted.toFloat() / fastingTotal }, modifier = Modifier.fillMaxWidth()) }
-        item { WeeklyActivityChart(records) }
+        item { WeeklyActivityChart(records, zone) }
         items(prayers, key = { it.prayerType }) { debt ->
             val label = PrayerType.entries.firstOrNull { it.name == debt.prayerType }?.title ?: debt.prayerType
             Card { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -420,32 +491,12 @@ fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, 
                 }
             }
         }
-        items(records.filter { record ->
-            val matchesFilter = when (recordFilter) {
-                "PRAYER" -> record.reference != "FASTING"
-                "FASTING" -> record.reference == "FASTING"
-                "ADJUSTMENT" -> record.kind.endsWith("ADJUSTMENT")
-                else -> true
-            }
-            val localizedReference = when (record.reference) {
-                "FAJR" -> "صبح فجر"
-                "DHUHR" -> "ظهر"
-                "ASR" -> "عصر"
-                "MAGHRIB" -> "مغرب"
-                "ISHA" -> "عشا"
-                "FASTING" -> "روزه"
-                else -> record.reference
-            }
-            val localizedKind = if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "ثبت انجام"
-            matchesFilter && (
-                record.kind.contains(search, true) || record.reference.contains(search, true) ||
-                    localizedReference.contains(search, true) || localizedKind.contains(search, true) ||
-                    record.createdAt.toString().contains(search)
-                )
-        }, key = { it.id }) { record ->
+        if (filteredRecords.isEmpty()) {
+            item { Text(if (records.isEmpty()) "هنوز سابقه‌ای ثبت نشده است." else "موردی با این جست‌وجو یا فیلتر پیدا نشد.", modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp)) }
+        } else items(filteredRecords, key = { it.id }) { record ->
             val category = if (record.reference == "FASTING") "روزه" else "نماز ${PrayerType.entries.firstOrNull { it.name == record.reference }?.title ?: record.reference}"
             val kindLabel = if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "ثبت انجام‌شده"
-            val localDate = java.time.Instant.ofEpochMilli(record.createdAt).atZone(ZoneId.systemDefault()).toLocalDate()
+            val localDate = Instant.ofEpochMilli(record.createdAt).atZone(zone).toLocalDate()
             Card { Column(Modifier.padding(10.dp)) {
                 Text("$category · $kindLabel", fontWeight = FontWeight.SemiBold)
                 Text(if (record.kind.endsWith("ADJUSTMENT")) "${record.beforeCompleted} ← ${record.afterCompleted}" else "+${record.amount} مورد")
@@ -456,9 +507,23 @@ fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, 
 }
 
 @Composable
-private fun WeeklyActivityChart(records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>) {
-    val today = remember { LocalDate.now() }
-    val zone = remember { ZoneId.systemDefault() }
+private fun WeeklyActivityChart(records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>, zone: ZoneId) {
+    var today by remember(zone) { mutableStateOf(LocalDate.now(zone)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, zone) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) today = LocalDate.now(zone)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(zone) {
+        while (true) {
+            val nextLocalMidnight = today.plusDays(1).atStartOfDay(zone)
+            delay(Duration.between(ZonedDateTime.now(zone).toInstant(), nextLocalMidnight.toInstant()).toMillis().coerceAtLeast(1L))
+            today = LocalDate.now(zone)
+        }
+    }
     val dailyActivity = remember(records, today, zone) {
         val byDate = records.asSequence()
             .filter { it.kind == "PRAYER" || it.kind == "FASTING" }
@@ -710,6 +775,16 @@ fun HelpScreen() {
                     Text("این برنامه ابزار ثبت و برآورد شخصی است، نه مرجع صدور فتوا. تا زمانی که مرجع تقلید انتخاب و قواعد رسمی او با منبع قابل‌ردیابی بررسی نشده باشند، درباره عادت ماهانه، نفاس، کفاره، فدیه یا مقدار شرعی بدهی حکم قطعی صادر نمی‌شود.")
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun DatabaseLoadingScreen() {
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator()
+            Text("در حال آماده‌سازی فضای امن و بررسی اطلاعات محلی…")
         }
     }
 }
