@@ -22,6 +22,9 @@ internal class DatabaseKeyProvider(
     @Suppress("UseKtx")
     fun getOrCreatePassphrase(): ByteArray {
         val saved = preferences.getString(ENCRYPTED_KEY, null)
+        check(saved != null || !requireExistingDatabaseKey) {
+            "اطلاعات کلید پایگاه داده موجود نیست؛ برای جلوگیری از جایگزینی کلید دیتابیس رمزگذاری‌شده، passphrase جدید ساخته نشد."
+        }
         val key = getOrCreateKeystoreKey(requireExisting = saved != null || requireExistingDatabaseKey)
         if (saved != null) {
             val packed = Base64.decode(saved, Base64.NO_WRAP)

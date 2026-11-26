@@ -317,9 +317,11 @@ class EncryptedBackupIntegrationTest {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
         preferences.edit().clear().commit()
         try {
+            DatabaseKeyProvider(context, "database_key_existing_test", alias).getOrCreatePassphrase().fill(0)
+            preferences.edit().remove("encrypted_passphrase").commit()
             val provider = DatabaseKeyProvider(context, "database_key_existing_test", alias, requireExistingDatabaseKey = true)
             assertThrows(IllegalStateException::class.java) { provider.getOrCreatePassphrase() }
-            assertFalse(keyStore.containsAlias(alias))
+            assertTrue(keyStore.containsAlias(alias))
             assertFalse(preferences.contains("encrypted_passphrase"))
         } finally {
             preferences.edit().clear().commit()

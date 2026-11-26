@@ -35,11 +35,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         System.loadLibrary("sqlcipher")
         val databaseFailure = runCatching { AppDatabase.get(applicationContext) }.exceptionOrNull()
-        val keystoreKeyLost = databaseFailure?.message?.contains("Android Keystore") == true
+        val keyMaterialMissing = databaseFailure?.message?.contains("کلید") == true
         setContent {
             MissedWorshipTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    if (databaseFailure != null) DatabaseUnavailableScreen(keystoreKeyLost)
+                    if (databaseFailure != null) DatabaseUnavailableScreen(keyMaterialMissing)
                     else HomeScreen(viewModel)
                 }
             }

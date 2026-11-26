@@ -650,7 +650,7 @@ fun HelpScreen() {
 }
 
 @Composable
-fun DatabaseUnavailableScreen(keystoreKeyLost: Boolean) {
+fun DatabaseUnavailableScreen(keyMaterialMissing: Boolean) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)
@@ -662,7 +662,7 @@ fun DatabaseUnavailableScreen(keystoreKeyLost: Boolean) {
             fontWeight = FontWeight.Bold
         )
         Text(
-            if (keystoreKeyLost) "کلید محافظت از پایگاه داده در Android Keystore پیدا نشد. برای محافظت از اطلاعات، کلید جایگزین ساخته نشده است."
+            if (keyMaterialMissing) "اطلاعات کلید محافظت از پایگاه داده یا envelope رمزگذاری‌شده آن پیدا نشد. برای محافظت از اطلاعات، کلید یا passphrase جایگزین ساخته نشده است."
             else "پایگاه داده رمزگذاری‌شده باز نشد. اطلاعات موجود برای جلوگیری از آسیب بیشتر تغییر داده نشده‌اند."
         )
         Text("برنامه را حذف نصب نکنید و داده‌های آن را پاک نکنید. اگر نسخه پشتیبان رمزگذاری‌شده دارید، فایل و گذرواژه آن را در جای امن نگه دارید؛ بازیابی این وضعیت به بررسی فنی نیاز دارد.")
