@@ -2,6 +2,8 @@ package ir.hirmand.missedprayers.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -65,6 +67,7 @@ import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
     profile: UserProfileEntity?, periods: List<ExcusePeriodEntity>,
@@ -104,7 +107,7 @@ fun ProfileScreen(
         item { OutlinedTextField(name, { name = it.take(60) }, label = { Text("نام نمایشی (اختیاری)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { Text("جنسیت (اختیاری)", fontWeight = FontWeight.SemiBold) }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("UNSPECIFIED" to "مشخص نشده", "WOMAN" to "خانم", "MAN" to "آقا", "PREFER_NOT_TO_SAY" to "ترجیح می‌دهم نگویم").forEach { (value, label) ->
                     OutlinedButton(onClick = { gender = value }) { Text(if (gender == value) "✓ $label" else label) }
                 }
@@ -115,7 +118,7 @@ fun ProfileScreen(
         item { OutlinedTextField(timezoneId, { timezoneId = it.take(80) }, label = { Text("منطقه زمانی IANA (مثلاً Asia/Tehran)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { Text("تقویم پیش‌فرض") }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("PERSIAN" to "شمسی", "ISLAMIC_CIVIL" to "قمری محاسباتی", "GREGORIAN" to "میلادی").forEach { (value, label) ->
                     OutlinedButton(onClick = { calendar = value }) { Text(if (calendar == value) "✓ $label" else label) }
                 }
@@ -153,7 +156,7 @@ fun ProfileScreen(
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("ثبت روزهای عذر یا بازه‌های شخصی", fontWeight = FontWeight.Bold)
                     Text("این بازه‌ها فقط ثبت می‌شوند و تا زمان انتخاب قاعده فقهی مستند، به‌طور خودکار از محاسبه کم نخواهند شد.", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("MENSTRUATION" to "عادت ماهانه", "POSTPARTUM" to "نفاس", "ILLNESS" to "بیماری", "OTHER_USER_RECORDED" to "سایر").forEach { (value, label) ->
                             OutlinedButton(onClick = { periodKind = value }) { Text(if (periodKind == value) "✓ $label" else label) }
                         }
