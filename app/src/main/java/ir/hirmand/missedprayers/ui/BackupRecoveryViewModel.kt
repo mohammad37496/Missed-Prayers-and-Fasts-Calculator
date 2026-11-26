@@ -74,7 +74,6 @@ class BackupRecoveryViewModel : ViewModel() {
     override fun onCleared() {
         pendingPassword?.fill('\u0000')
         pendingPassword = null
-        super.onCleared()
     }
 
     private fun readEncryptedBackup(contentResolver: ContentResolver, uri: Uri): ByteArray {

@@ -98,7 +98,10 @@ class EncryptedBackupManager(
             val gender = it.getString("gender"); val calendar = it.getString("calendarPreference")
             require(gender in setOf("UNSPECIFIED", "WOMAN", "MAN", "PREFER_NOT_TO_SAY"))
             require(calendar in setOf("PERSIAN", "GREGORIAN", "ISLAMIC_CIVIL"))
-            val zone = it.getString("timezoneId"); ZoneId.of(zone)
+            val zone = it.getString("timezoneId")
+            val today = LocalDate.now(ZoneId.of(zone))
+            require(start == null || !start.isAfter(today)) { "تاریخ شروع برآورد در فایل پشتیبان در آینده است" }
+            require(end == null || !end.isAfter(today)) { "تاریخ پایان برآورد در فایل پشتیبان در آینده است" }
             val marja = it.optNullableString("marjaId")
             require(marja == null || marja.matches(Regex("[a-z0-9_-]{2,48}")))
             UserProfileEntity(displayName = it.optNullableString("displayName")?.take(60), gender = gender, taklifStartDate = start?.toString(), taklifEndDate = end?.toString(), timezoneId = zone, calendarPreference = calendar, marjaId = marja, updatedAt = it.getLong("updatedAt"))
@@ -124,8 +127,10 @@ class EncryptedBackupManager(
             require(marja == null || marja.matches(Regex("[a-z0-9_-]{2,48}")))
             FiqhPreferencesEntity(marjaId = marja, rulesetVersion = it.optNullableString("rulesetVersion")?.take(80), acceptedSourceUrl = url, updatedAt = it.getLong("updatedAt"))
         }
+        val cacheToday = LocalDate.now(ZoneId.of(profile?.timezoneId ?: ZoneId.systemDefault().id))
         val verses = root.getJSONArray("dailyVerses").toEntities { item ->
-            LocalDate.parse(item.getString("dayKey"))
+            val dayKey = LocalDate.parse(item.getString("dayKey"))
+            require(!dayKey.isAfter(cacheToday)) { "تاریخ آیه ذخیره‌شده در آینده است" }
             val surah = item.getInt("surah"); val ayah = item.getInt("ayah"); val global = item.getInt("globalNumber")
             require(surah in 1..114 && ayah in 1..286 && global in 1..6236)
             if (backupVersion >= 6) require(item.has("translationFootnotes"))
@@ -150,6 +155,9 @@ class EncryptedBackupManager(
             DailyVerseEntity(item.getString("dayKey"), surah, ayah, global, arabicText, translation, translationSource, translationVersion, tafsirText, tafsirSource, audio, reciterName, item.getLong("fetchedAt"), footnotes)
         }
         require(verses.size <= 60 && verses.map { it.dayKey }.distinct().size == verses.size)
+        // Daily verses are a disposable cache, not historical user data. Keep only
+        // the same seven-calendar-day window enforced on ordinary cache reads.
+        val retainedVerses = verses.filter { !LocalDate.parse(it.dayKey).isBefore(cacheToday.minusDays(6)) }
 
         val dao = database.debtDao()
         database.withTransaction {
@@ -162,7 +170,7 @@ class EncryptedBackupManager(
             if (periods.isNotEmpty()) dao.saveAllExcusePeriods(periods)
             if (planner != null) dao.saveAllPlannerSettings(planner)
             if (fiqh != null) dao.saveAllFiqhPreferences(fiqh)
-            if (verses.isNotEmpty()) dao.saveAllDailyVerses(verses)
+            if (retainedVerses.isNotEmpty()) dao.saveAllDailyVerses(retainedVerses)
         }
         } finally {
             plain.fill(0)

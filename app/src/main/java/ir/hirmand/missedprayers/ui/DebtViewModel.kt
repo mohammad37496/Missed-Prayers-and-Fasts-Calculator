@@ -22,6 +22,7 @@ import java.time.LocalDate
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -221,15 +222,13 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
         runCatching { repository.saveFiqhPreferences(preferences) }.onFailure { onError(it.message ?: "ذخیره تنظیمات فقهی انجام نشد") }
     }
 
-    fun createBackup(password: CharArray, onResult: (Result<ByteArray>) -> Unit) = viewModelScope.launch {
-        val result = runCatching { backupManager.createBackup(password) }
-        password.fill('\u0000')
+    fun createBackup(password: CharArray, onResult: (Result<ByteArray>) -> Unit) = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+        val result = runBackupOperation(password) { backupManager.createBackup(password) }
         onResult(result)
     }
 
-    fun restoreBackup(file: ByteArray, password: CharArray, onResult: (Result<Unit>) -> Unit) = viewModelScope.launch {
-        val result = runCatching { backupManager.restoreBackup(file, password) }
-        password.fill('\u0000')
+    fun restoreBackup(file: ByteArray, password: CharArray, onResult: (Result<Unit>) -> Unit) = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+        val result = runBackupOperation(password) { backupManager.restoreBackup(file, password) }
         onResult(result)
     }
 
@@ -242,6 +241,5 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
         pendingBackupForPicker = null
         pendingRestorePasswordForPicker?.fill('\u0000')
         pendingRestorePasswordForPicker = null
-        super.onCleared()
     }
 }

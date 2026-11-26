@@ -118,6 +118,139 @@ class EncryptedBackupRestoreValidationTest {
         assertNull(database.debtDao().getProfileSnapshot())
     }
 
+    @Test fun restoreRejectsFutureObligationDatesWithoutReplacingExistingData() = runBlocking {
+        val dao = database.debtDao()
+        val today = LocalDate.now(java.time.ZoneId.of("UTC"))
+        dao.savePrayer(PrayerDebtEntity("FAJR", 25, 7, 1_000L))
+        dao.saveProfile(
+            UserProfileEntity(
+                displayName = "پروفایل فعلی", gender = "UNSPECIFIED",
+                taklifStartDate = today.minusYears(10).toString(), taklifEndDate = null,
+                timezoneId = "UTC", calendarPreference = "PERSIAN", marjaId = null, updatedAt = 1_000L
+            )
+        )
+        val password = "future-profile-backup-validation".toCharArray()
+        val manager = EncryptedBackupManager(database)
+
+        try {
+            listOf(
+                JSONObject().put("taklifStartDate", today.plusDays(1).toString()).put("taklifEndDate", JSONObject.NULL),
+                JSONObject().put("taklifStartDate", today.minusDays(1).toString()).put("taklifEndDate", today.plusDays(1).toString())
+            ).forEach { dates ->
+                val profile = JSONObject()
+                    .put("displayName", "پروفایل وارداتی")
+                    .put("gender", "UNSPECIFIED")
+                    .put("timezoneId", "UTC")
+                    .put("calendarPreference", "PERSIAN")
+                    .put("marjaId", JSONObject.NULL)
+                    .put("updatedAt", 2_000L)
+                    .put("taklifStartDate", dates.get("taklifStartDate"))
+                    .put("taklifEndDate", dates.get("taklifEndDate"))
+                val payload = JSONObject()
+                    .put("schemaVersion", 6)
+                    .put("createdAt", 2_000L)
+                    .put("prayers", JSONArray())
+                    .put("fasting", JSONObject.NULL)
+                    .put("records", JSONArray())
+                    .put("profile", profile)
+                    .put("periods", JSONArray())
+                    .put("planner", JSONObject.NULL)
+                    .put("fiqh", JSONObject.NULL)
+                    .put("dailyVerses", JSONArray())
+                val encrypted = EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+
+                assertThrows(IllegalArgumentException::class.java) {
+                    runBlocking { manager.restoreBackup(encrypted, password.copyOf()) }
+                }
+                assertEquals(25, dao.getPrayer("FAJR")?.total)
+                assertEquals(7, dao.getPrayer("FAJR")?.completed)
+                assertEquals("پروفایل فعلی", dao.getProfileSnapshot()?.displayName)
+            }
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
+    @Test fun restoreRejectsFutureDatedDailyVerseWithoutReplacingExistingData() = runBlocking {
+        val dao = database.debtDao()
+        val today = LocalDate.now(java.time.ZoneId.systemDefault())
+        dao.savePrayer(PrayerDebtEntity("FAJR", 18, 6, 1_000L))
+        dao.saveDailyVerse(
+            DailyVerseEntity(
+                dayKey = today.toString(), surah = 1, ayah = 1, globalNumber = 1,
+                arabicText = "بِسْمِ اللَّهِ", persianTranslation = "ترجمه فعلی",
+                translationSource = "QuranEnc · Rowwad", translationVersion = "1.1.3",
+                tafsirText = null, tafsirSource = null, recitationUrl = null, reciterName = null,
+                fetchedAt = 1_000L
+            )
+        )
+        val futureVerse = JSONObject()
+            .put("dayKey", today.plusDays(1).toString())
+            .put("surah", 1).put("ayah", 1).put("globalNumber", 1)
+            .put("arabicText", "بِسْمِ اللَّهِ").put("persianTranslation", "ترجمه آینده")
+            .put("translationSource", "QuranEnc · Rowwad").put("translationVersion", "1.1.3")
+            .put("translationFootnotes", JSONObject.NULL)
+            .put("tafsirText", JSONObject.NULL).put("tafsirSource", JSONObject.NULL)
+            .put("recitationUrl", JSONObject.NULL).put("reciterName", JSONObject.NULL)
+            .put("fetchedAt", 2_000L)
+        val payload = JSONObject()
+            .put("schemaVersion", 6).put("createdAt", 2_000L)
+            .put("prayers", JSONArray()).put("fasting", JSONObject.NULL)
+            .put("records", JSONArray()).put("profile", JSONObject.NULL)
+            .put("periods", JSONArray()).put("planner", JSONObject.NULL)
+            .put("fiqh", JSONObject.NULL).put("dailyVerses", JSONArray().put(futureVerse))
+        val password = "future-daily-verse-backup".toCharArray()
+
+        try {
+            val encrypted = EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking { EncryptedBackupManager(database).restoreBackup(encrypted, password.copyOf()) }
+            }
+            assertEquals(18, dao.getPrayer("FAJR")?.total)
+            assertEquals(6, dao.getPrayer("FAJR")?.completed)
+            assertEquals("ترجمه فعلی", dao.getDailyVerse(today.toString())?.persianTranslation)
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
+    @Test fun restorePrunesDailyVerseCacheToSevenCalendarDays() = runBlocking {
+        val today = LocalDate.now(java.time.ZoneId.systemDefault())
+        val verses = JSONArray()
+        (0L..7L).forEach { daysAgo ->
+            verses.put(
+                JSONObject()
+                    .put("dayKey", today.minusDays(daysAgo).toString())
+                    .put("surah", 1).put("ayah", 1).put("globalNumber", 1)
+                    .put("arabicText", "بِسْمِ اللَّهِ").put("persianTranslation", "ترجمه $daysAgo")
+                    .put("translationSource", "QuranEnc · Rowwad").put("translationVersion", "1.1.3")
+                    .put("translationFootnotes", JSONObject.NULL)
+                    .put("tafsirText", JSONObject.NULL).put("tafsirSource", JSONObject.NULL)
+                    .put("recitationUrl", JSONObject.NULL).put("reciterName", JSONObject.NULL)
+                    .put("fetchedAt", 1_000L + daysAgo)
+            )
+        }
+        val payload = JSONObject()
+            .put("schemaVersion", 6).put("createdAt", 2_000L)
+            .put("prayers", JSONArray()).put("fasting", JSONObject.NULL)
+            .put("records", JSONArray()).put("profile", JSONObject.NULL)
+            .put("periods", JSONArray()).put("planner", JSONObject.NULL)
+            .put("fiqh", JSONObject.NULL).put("dailyVerses", verses)
+        val password = "seven-day-cache-backup".toCharArray()
+
+        try {
+            val encrypted = EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+            EncryptedBackupManager(database).restoreBackup(encrypted, password.copyOf())
+
+            val restored = database.debtDao().getAllDailyVerses()
+            assertEquals(7, restored.size)
+            assertTrue(restored.all { !LocalDate.parse(it.dayKey).isBefore(today.minusDays(6)) })
+            assertNull(database.debtDao().getDailyVerse(today.minusDays(7).toString()))
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
     @Test fun releaseSafeContentModeDoesNotRequestOrExposeUnverifiedTafsirOrAudio() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         var tafsirCatalogueCalls = 0
