@@ -37,16 +37,29 @@ jobs:
       - name: Run unit tests and assemble APK
         run: ./gradlew --no-daemon testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug lintDebug
 
+      - name: Detect Linux emulator acceleration
+        id: emulator-accel
+        run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; fi
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "tcg=false" >> "$GITHUB_OUTPUT"
+            echo "KVM available; Android 16 emulator will use hardware acceleration."
+          else
+            echo "tcg=true" >> "$GITHUB_OUTPUT"
+            echo "KVM unavailable; use the Android 15 image with TCG for a responsive runtime test."
+          fi
+
       - name: Run instrumentation tests on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          ANDROID_I_WANT_MY_TCG: "yes"
+          ANDROID_I_WANT_MY_TCG: ${{ steps.emulator-accel.outputs.tcg == 'true' && 'yes' || '' }}
         with:
-          api-level: 36
+          api-level: ${{ steps.emulator-accel.outputs.tcg == 'true' && '35' || '36' }}
           target: google_apis
           arch: x86_64
           profile: pixel_2
           emulator-boot-timeout: 1200
+          disable-linux-hw-accel: ${{ steps.emulator-accel.outputs.tcg == 'true' }}
           disable-animations: true
           script: ./gradlew --no-daemon connectedDebugAndroidTest
 

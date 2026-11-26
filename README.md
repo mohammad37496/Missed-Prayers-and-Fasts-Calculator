@@ -28,7 +28,7 @@
 - SQLCipher Android 4.20.0 با کلید تصادفی دیتابیس محافظت‌شده توسط Android Keystore و AES-GCM؛ Android Auto Backup و Device Transfer غیرفعال‌اند
 - آیه روز واقعی: متن عربی بدون تغییر از Tanzil Uthmani v1.1، ترجمه فارسی Rowwad از QuranEnc با پانوشت‌های اصلی مترجم به‌صورت عیناً حفظ‌شده، و تفسیر فارسی As-Saadi از endpoint مستقل Tafsir؛ منبع و نسخه هر دو متن نمایش داده می‌شوند
 - cache محلی آیه روز برای استفاده آفلاین؛ هنگام بازشدن برنامه ابتدا نسخه محلی نمایش داده می‌شود و سپس در پس‌زمینه به‌روزرسانی می‌شود؛ اگر فقط آیه روزهای قبل cache شده باشد، تاریخ آن صریحاً نمایش داده می‌شود و به‌عنوان آیه امروز جا زده نمی‌شود
-- GitHub Actions workflow برای تست واحد، ساخت APK و اجرای instrumentation روی Android 16 emulator
+- GitHub Actions workflow برای تست واحد، ساخت APK و اجرای instrumentation؛ در صورت دسترسی runner به KVM از Android 16 استفاده می‌شود و در نبود KVM به Android 15 + TCG برمی‌گردد، چون Android 16 + TCG در runner فعلی پس از boot نیز ADB property fetch را پاسخ نمی‌دهد. targetSdk/compileSdk همچنان 36 است.
 
 ### مواردی که عمداً فعال نشده‌اند
 

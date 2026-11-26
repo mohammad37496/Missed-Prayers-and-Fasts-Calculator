@@ -355,6 +355,36 @@ class EncryptedBackupRestoreValidationTest {
         assertFalse(keyProvider.hasStoredKeyMaterial())
     }
 
+    @Test fun cleanupPreservesARecoveryDatabaseAlreadySelectedAsActive() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val id = UUID.randomUUID().toString().replace("-", "")
+        val recoveryName = "missed_worship_recovered_$id.db"
+        val keyProvider = DatabaseKeyProvider(
+            context,
+            preferencesName = "database_key_recovery_$id",
+            keyAlias = "missed_worship_recovery_key_$id"
+        )
+        val file = context.getDatabasePath(recoveryName)
+        file.parentFile?.mkdirs()
+        file.writeBytes(byteArrayOf(5, 6, 7, 8))
+        keyProvider.getOrCreatePassphrase().fill(0)
+        val selection = context.getSharedPreferences("database_selection", Context.MODE_PRIVATE)
+        val previousActiveName = selection.getString("active_database_name", null)
+        val pendingKey = "pending_recovery_$id"
+        try {
+            assertTrue(selection.edit().putString("active_database_name", recoveryName).putString(pendingKey, recoveryName).commit())
+            AppDatabase.cleanupInterruptedRecoveriesForTests(context)
+            assertTrue(file.exists())
+            assertTrue(keyProvider.hasStoredKeyMaterial())
+            assertFalse(selection.contains(pendingKey))
+        } finally {
+            if (previousActiveName == null) selection.edit().remove("active_database_name").commit()
+            else selection.edit().putString("active_database_name", previousActiveName).commit()
+            context.deleteDatabase(recoveryName)
+            keyProvider.deleteKeyMaterial()
+        }
+    }
+
     @Test fun quranEncTranslationFootnotesAreStoredVerbatimAndSurviveEncryptedBackupRestore() = runBlocking {
         val footnotes = "[۱] پانوشت نخست، با حفظ خط و نشانه‌گذاری منبع.\n[۲] پانوشت دوم."
         val provider = object : QuranEncContentProvider {

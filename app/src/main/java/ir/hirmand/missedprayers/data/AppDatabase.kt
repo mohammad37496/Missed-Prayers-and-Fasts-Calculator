@@ -124,9 +124,9 @@ abstract class AppDatabase : RoomDatabase() {
             } finally {
                 if (!activated) {
                     runCatching { recoveryDatabase?.close() }
-                    appContext.deleteDatabase(recoveryName)
-                    keyProvider.deleteKeyMaterial()
-                    selectionPreferences.edit().remove(pendingKey).commit()
+                    if (deleteRecoveryDatabaseFiles(appContext, recoveryName) && keyProvider.deleteKeyMaterial()) {
+                        selectionPreferences.edit().remove(pendingKey).commit()
+                    }
                 }
                 passphrase?.fill(0)
                 synchronized(lock) { activeRecoveryId = null }
@@ -138,23 +138,40 @@ abstract class AppDatabase : RoomDatabase() {
             val preferences = context.getSharedPreferences(DATABASE_SELECTION_PREFERENCES, Context.MODE_PRIVATE)
             val pendingKeys = preferences.all.keys.filter { it.startsWith(PENDING_RECOVERY_PREFIX) }
             if (pendingKeys.isEmpty()) return
+            val activeName = preferences.getString(ACTIVE_DATABASE_KEY, DATABASE_NAME) ?: DATABASE_NAME
             val editor = preferences.edit()
             pendingKeys.forEach { pendingKey ->
                 val id = pendingKey.removePrefix(PENDING_RECOVERY_PREFIX)
                 val expectedName = "$RECOVERY_DATABASE_PREFIX$id$RECOVERY_DATABASE_SUFFIX"
                 if (id == activeRecoveryId) return@forEach
                 if (id.matches(Regex("[0-9a-f]{32}")) && preferences.getString(pendingKey, null) == expectedName) {
-                    context.deleteDatabase(expectedName)
-                    DatabaseKeyProvider(
+                    if (activeName == expectedName) {
+                        editor.remove(pendingKey)
+                        return@forEach
+                    }
+                    if (!deleteRecoveryDatabaseFiles(context, expectedName)) return@forEach
+                    val keyRemoved = DatabaseKeyProvider(
                         context,
                         preferencesName = "database_key_recovery_$id",
                         keyAlias = "missed_worship_recovery_key_$id",
                         requireExistingDatabaseKey = true
                     ).deleteKeyMaterial()
+                    if (!keyRemoved) return@forEach
                 }
                 editor.remove(pendingKey)
             }
             editor.commit()
+        }
+
+        private fun deleteRecoveryDatabaseFiles(context: Context, name: String): Boolean {
+            val databaseFile = context.getDatabasePath(name)
+            context.deleteDatabase(name)
+            return listOf(
+                databaseFile,
+                File(databaseFile.path + "-wal"),
+                File(databaseFile.path + "-shm"),
+                File(databaseFile.path + "-journal")
+            ).none(File::exists)
         }
 
         internal fun clearActiveInstanceForTests() {
