@@ -109,6 +109,9 @@ class EncryptedBackupManager(
         val periods = root.getJSONArray("periods").toEntities { item ->
             val kind = item.getString("kind"); val start = LocalDate.parse(item.getString("startDate")); val end = LocalDate.parse(item.getString("endDate"))
             require(kind in setOf("MENSTRUATION", "POSTPARTUM", "ILLNESS", "OTHER_USER_RECORDED") && !end.isBefore(start))
+            require(java.time.temporal.ChronoUnit.DAYS.between(start, end) < 4000) {
+                "مدت بازه عذر در فایل پشتیبان از حد مجاز بیشتر است"
+            }
             val id = item.getLong("id")
             require(id > 0) { "شناسه بازه عذر معتبر نیست" }
             ExcusePeriodEntity(id, kind, start.toString(), end.toString(), item.optNullableString("note"), item.getLong("createdAt"))

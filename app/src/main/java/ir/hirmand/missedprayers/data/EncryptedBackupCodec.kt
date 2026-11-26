@@ -54,7 +54,12 @@ object EncryptedBackupCodec {
         require(password.size >= 12) { "گذرواژه نسخه پشتیبان باید دست‌کم ۱۲ نویسه باشد" }
         val spec = PBEKeySpec(password, salt, ITERATIONS, KEY_BITS)
         return try {
-            SecretKeySpec(SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded, "AES")
+            val encodedKey = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+            try {
+                SecretKeySpec(encodedKey, "AES")
+            } finally {
+                encodedKey.fill(0)
+            }
         } finally {
             spec.clearPassword()
         }

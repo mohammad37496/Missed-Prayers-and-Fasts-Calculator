@@ -16,6 +16,21 @@ import kotlinx.coroutines.withContext
 abstract class AppDatabase : RoomDatabase() {
     abstract fun debtDao(): DebtDao
 
+    @Volatile private var sqlCipherPassphrase: ByteArray? = null
+
+    private fun retainSqlCipherPassphrase(passphrase: ByteArray) {
+        sqlCipherPassphrase = passphrase
+    }
+
+    override fun close() {
+        try {
+            super.close()
+        } finally {
+            sqlCipherPassphrase?.fill(0)
+            sqlCipherPassphrase = null
+        }
+    }
+
     companion object {
         private const val DATABASE_NAME = "missed_worship.db"
         private const val DATABASE_SELECTION_PREFERENCES = "database_selection"
@@ -64,15 +79,26 @@ abstract class AppDatabase : RoomDatabase() {
                 check(existingDatabase || !keyProvider.hasStoredKeyMaterial()) {
                     "فایل پایگاه داده وجود ندارد اما مواد کلید آن باقی مانده است؛ برای جلوگیری از ایجاد دیتابیس خالی، راه‌اندازی متوقف شد."
                 }
-                Room.databaseBuilder(
-                    appContext,
-                    AppDatabase::class.java,
-                    selectedName
-                ).openHelperFactory(
-                    SupportOpenHelperFactory(keyProvider.getOrCreatePassphrase())
-                )
-                    .addMigrations(*MIGRATIONS)
-                    .build().also { instance = it }
+                val passphrase = keyProvider.getOrCreatePassphrase()
+                try {
+                    Room.databaseBuilder(
+                        appContext,
+                        AppDatabase::class.java,
+                        selectedName
+                    ).openHelperFactory(
+                        SupportOpenHelperFactory(passphrase)
+                    )
+                        .addMigrations(*MIGRATIONS)
+                        .build().also { database ->
+                            // SQLCipher retains this exact array for database re-opens.
+                            // Keep it only for the database lifetime and wipe it on close.
+                            database.retainSqlCipherPassphrase(passphrase)
+                            instance = database
+                        }
+                } catch (error: Throwable) {
+                    passphrase.fill(0)
+                    throw error
+                }
             }
         }
 

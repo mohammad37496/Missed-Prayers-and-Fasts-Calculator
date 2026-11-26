@@ -48,7 +48,7 @@ class BackupRecoveryViewModel : ViewModel() {
             return
         }
         _state.value = BackupRecoveryState(restoring = true)
-        viewModelScope.launch {
+        val restoreJob = viewModelScope.launch {
             var bytes: ByteArray? = null
             try {
                 val backupBytes = withContext(Dispatchers.IO) { readEncryptedBackup(contentResolver, uri) }
@@ -65,6 +65,8 @@ class BackupRecoveryViewModel : ViewModel() {
                 if (_state.value.restoring) _state.value = _state.value.copy(restoring = false)
             }
         }
+        // Completion handlers also run when cancellation happens before the coroutine body starts.
+        restoreJob.invokeOnCompletion { password.fill('\u0000') }
     }
 
     fun consumeCompletion() {

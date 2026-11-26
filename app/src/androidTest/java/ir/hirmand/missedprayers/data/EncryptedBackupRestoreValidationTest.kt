@@ -171,6 +171,48 @@ class EncryptedBackupRestoreValidationTest {
         }
     }
 
+    @Test fun restoreRejectsOverlongExcusePeriodsWithoutReplacingExistingData() = runBlocking {
+        val dao = database.debtDao()
+        val today = LocalDate.now(java.time.ZoneId.of("UTC"))
+        dao.savePrayer(PrayerDebtEntity("FAJR", 25, 7, 1_000L))
+        dao.insertExcusePeriod(
+            ExcusePeriodEntity(
+                kind = "OTHER_USER_RECORDED",
+                startDate = today.minusDays(2).toString(),
+                endDate = today.minusDays(1).toString(),
+                note = "بازه فعلی",
+                createdAt = 1_000L
+            )
+        )
+        val importedPeriod = JSONObject()
+            .put("id", 2L)
+            .put("kind", "OTHER_USER_RECORDED")
+            .put("startDate", today.minusDays(4_000).toString())
+            .put("endDate", today.toString())
+            .put("note", JSONObject.NULL)
+            .put("createdAt", 2_000L)
+        val payload = JSONObject()
+            .put("schemaVersion", 6).put("createdAt", 2_000L)
+            .put("prayers", JSONArray()).put("fasting", JSONObject.NULL)
+            .put("records", JSONArray()).put("profile", JSONObject.NULL)
+            .put("periods", JSONArray().put(importedPeriod))
+            .put("planner", JSONObject.NULL).put("fiqh", JSONObject.NULL)
+            .put("dailyVerses", JSONArray())
+        val password = "overlong-excuse-period-backup".toCharArray()
+
+        try {
+            val encrypted = EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking { EncryptedBackupManager(database).restoreBackup(encrypted, password.copyOf()) }
+            }
+            assertEquals(25, dao.getPrayer("FAJR")?.total)
+            assertEquals(7, dao.getPrayer("FAJR")?.completed)
+            assertEquals("بازه فعلی", dao.getAllExcusePeriods().single().note)
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
     @Test fun restoreRejectsFutureDatedDailyVerseWithoutReplacingExistingData() = runBlocking {
         val dao = database.debtDao()
         val today = LocalDate.now(java.time.ZoneId.systemDefault())

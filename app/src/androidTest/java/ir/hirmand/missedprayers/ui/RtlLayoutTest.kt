@@ -14,6 +14,7 @@ import ir.hirmand.missedprayers.data.DebtRecordEntity
 import ir.hirmand.missedprayers.domain.CalendarDates
 import ir.hirmand.missedprayers.ui.theme.MissedWorshipTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -81,6 +82,29 @@ class RtlLayoutTest {
         composeRule.onNodeWithText("ذخیره برنامه و یادآورها").performScrollTo().assertIsNotEnabled()
     }
 
+    @Test fun profileChoiceButtonsExposeSelectedStateToAccessibility() {
+        composeRule.setContent {
+            MissedWorshipTheme {
+                ProfileScreen(
+                    profile = null,
+                    periods = emptyList(),
+                    onSave = {},
+                    onAddPeriod = { _, _, _, _ -> true },
+                    onDeletePeriod = {},
+                    onApplyEstimate = { _, _, _ -> }
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("✓ مشخص نشده").assertIsSelected()
+        composeRule.onNodeWithText("میلادی").performScrollTo().performClick()
+        composeRule.onNodeWithText("✓ میلادی").assertIsSelected()
+        composeRule.onNodeWithText("آقا").performScrollTo().performClick()
+        composeRule.onNodeWithText("✓ آقا").assertIsSelected()
+        composeRule.onNodeWithText("نفاس").performScrollTo().performClick()
+        composeRule.onNodeWithText("✓ نفاس").assertIsSelected()
+    }
+
     @Test fun weeklyActivityChartExposesUnambiguousFullDatesToAccessibility() {
         val today = LocalDate.now(ZoneId.systemDefault())
         val record = DebtRecordEntity(
@@ -109,6 +133,9 @@ class RtlLayoutTest {
             "${date}: نماز ${if (date == today) 1 else 0}، روزه 0"
         }
         composeRule.onNodeWithContentDescription(expectedDescription).assertExists()
+        val todayLabelX = composeRule.onNodeWithContentDescription(today.toString()).fetchSemanticsNode().boundsInRoot.center.x
+        val oldestLabelX = composeRule.onNodeWithContentDescription(today.minusDays(6).toString()).fetchSemanticsNode().boundsInRoot.center.x
+        assertTrue("RTL date labels must stay aligned with the chart's left-to-right timeline", todayLabelX > oldestLabelX)
     }
 
     @Test fun moreDestinationsRemainReachableThroughVerticalScrolling() {

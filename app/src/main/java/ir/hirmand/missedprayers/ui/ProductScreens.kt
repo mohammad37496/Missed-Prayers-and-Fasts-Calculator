@@ -173,7 +173,7 @@ fun ProfileScreen(
         item {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("UNSPECIFIED" to "مشخص نشده", "WOMAN" to "خانم", "MAN" to "آقا", "PREFER_NOT_TO_SAY" to "ترجیح می‌دهم نگویم").forEach { (value, label) ->
-                    OutlinedButton(onClick = { gender = value }) { Text(if (gender == value) "✓ $label" else label) }
+                    OutlinedButton(onClick = { gender = value }, modifier = Modifier.semantics { selected = gender == value }) { Text(if (gender == value) "✓ $label" else label) }
                 }
             }
         }
@@ -202,7 +202,7 @@ fun ProfileScreen(
                         }.onFailure {
                             error = "یکی از تاریخ‌ها در تقویم فعلی معتبر نیست؛ ابتدا آن را اصلاح کنید. تقویم تغییر نکرد."
                         }
-                    }) { Text(if (calendar == value) "✓ $label" else label) }
+                    }, modifier = Modifier.semantics { selected = calendar == value }) { Text(if (calendar == value) "✓ $label" else label) }
                 }
             }
         }
@@ -244,9 +244,9 @@ fun ProfileScreen(
             }
         }
         if (start.isNotBlank() && estimatePreviewResult?.isFailure == true) {
-            item { Text(estimatePreviewResult?.exceptionOrNull()?.message ?: "تاریخ‌های بازه برآورد معتبر نیستند.", color = MaterialTheme.colorScheme.error) }
+            item { Text(estimatePreviewResult?.exceptionOrNull()?.message ?: "تاریخ‌های بازه برآورد معتبر نیستند.", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
         }
-        if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
+        if (error != null) item { Text(error!!, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
         item {
             Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -254,7 +254,7 @@ fun ProfileScreen(
                     Text("این بازه‌ها فقط ثبت می‌شوند و تا زمان انتخاب قاعده فقهی مستند، به‌طور خودکار از محاسبه کم نخواهند شد.", style = MaterialTheme.typography.bodySmall)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("MENSTRUATION" to "عادت ماهانه", "POSTPARTUM" to "نفاس", "ILLNESS" to "بیماری", "OTHER_USER_RECORDED" to "سایر").forEach { (value, label) ->
-                            OutlinedButton(onClick = { periodKind = value }) { Text(if (periodKind == value) "✓ $label" else label) }
+                            OutlinedButton(onClick = { periodKind = value }, modifier = Modifier.semantics { selected = periodKind == value }) { Text(if (periodKind == value) "✓ $label" else label) }
                         }
                     }
                     OutlinedTextField(periodStart, { periodStart = it }, label = { Text("شروع ${calendarLabel(calendar)} YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
@@ -617,7 +617,7 @@ private fun WeeklyActivityChart(records: List<ir.hirmand.missedprayers.data.Debt
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    dailyActivity.forEach { (date, _, _) ->
+                    dailyActivity.asReversed().forEach { (date, _, _) ->
                         Text(
                             "${date.dayOfMonth}/${date.monthValue}",
                             modifier = Modifier.semantics { contentDescription = date.toString() },
