@@ -17,13 +17,13 @@ class AppDatabaseMigrationTest {
     )
 
     @Test fun migrationFromVersionOnePreservesDebtAndAddsNewTables() {
-        val name = "migration-v1-to-v5"
+        val name = "migration-v1-to-v6"
         helper.createDatabase(name, 1).apply {
             execSQL("INSERT INTO prayer_debts (prayerType,total,completed,updatedAt) VALUES ('FAJR',100,12,1000)")
             execSQL("INSERT INTO fasting_debt (id,total,completed,updatedAt) VALUES (1,30,4,1000)")
             close()
         }
-        val migrated = helper.runMigrationsAndValidate(name, 5, true, *AppDatabase.MIGRATIONS)
+        val migrated = helper.runMigrationsAndValidate(name, 6, true, *AppDatabase.MIGRATIONS)
         migrated.query("SELECT total,completed FROM prayer_debts WHERE prayerType='FAJR'").use { cursor ->
             check(cursor.moveToFirst())
             assertEquals(100, cursor.getInt(0))
@@ -37,6 +37,10 @@ class AppDatabaseMigrationTest {
         migrated.query("PRAGMA table_info(debt_records)").use { cursor ->
             val names = buildSet { while (cursor.moveToNext()) add(cursor.getString(1)) }
             check("beforeCompleted" in names && "afterCompleted" in names)
+        }
+        migrated.query("PRAGMA table_info(daily_verses)").use { cursor ->
+            val names = buildSet { while (cursor.moveToNext()) add(cursor.getString(1)) }
+            check("translationFootnotes" in names)
         }
         migrated.close()
         InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)

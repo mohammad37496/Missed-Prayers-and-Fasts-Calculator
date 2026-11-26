@@ -47,6 +47,20 @@ internal class DatabaseKeyProvider(
         return passphrase
     }
 
+    fun hasStoredKeyMaterial(): Boolean = preferences.contains(ENCRYPTED_KEY) || runCatching {
+        KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.containsAlias(keyAlias)
+    }.getOrDefault(false)
+
+    @Suppress("ApplySharedPref", "UseKtx") // Persist envelope removal before deleting its Keystore key.
+    fun deleteKeyMaterial() {
+        preferences.edit().clear().commit()
+        runCatching {
+            KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+                .takeIf { it.containsAlias(keyAlias) }
+                ?.deleteEntry(keyAlias)
+        }
+    }
+
     private fun getOrCreateKeystoreKey(requireExisting: Boolean): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getKey(keyAlias, null) as? SecretKey)?.let { return it }

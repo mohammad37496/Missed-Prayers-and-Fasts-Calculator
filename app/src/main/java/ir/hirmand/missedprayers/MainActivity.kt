@@ -61,7 +61,13 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when {
                         !databaseChecked -> DatabaseLoadingScreen()
-                        databaseFailure != null -> DatabaseUnavailableScreen(keyMaterialMissing)
+                        databaseFailure != null -> DatabaseUnavailableScreen(
+                            keyMaterialMissing = keyMaterialMissing,
+                            onRestoreBackup = { bytes, password ->
+                                AppDatabase.restoreFromBackup(applicationContext, bytes, password)
+                            },
+                            onRecoveryComplete = { recreate() }
+                        )
                         else -> HomeScreen(viewModel)
                     }
                 }

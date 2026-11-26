@@ -1,5 +1,9 @@
 package ir.hirmand.missedprayers.ui
 
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +56,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.DisposableEffect
@@ -64,6 +69,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import ir.hirmand.missedprayers.data.DailyVerseResult
+import ir.hirmand.missedprayers.data.EncryptedBackupCodec
 import ir.hirmand.missedprayers.data.ExcusePeriodEntity
 import ir.hirmand.missedprayers.data.FastingDebtEntity
 import ir.hirmand.missedprayers.data.FiqhPreferencesEntity
@@ -83,6 +89,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.Duration
 import java.time.ZonedDateTime
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
@@ -657,6 +667,10 @@ fun DailyVerseCard(result: DailyVerseResult, onRefresh: () -> Unit) {
                 Text(verse.arabicText, style = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Serif), color = MaterialTheme.colorScheme.primary)
                 Text(verse.persianTranslation, style = MaterialTheme.typography.bodyLarge)
                 Text("ترجمه: ${verse.translationSource} · نسخه ${verse.translationVersion}", style = MaterialTheme.typography.labelSmall)
+                verse.translationFootnotes?.takeIf(String::isNotBlank)?.let { footnotes ->
+                    Text("پانوشت‌های مترجم", fontWeight = FontWeight.Bold)
+                    Text(footnotes, style = MaterialTheme.typography.bodySmall)
+                }
                 if (verse.tafsirText != null) {
                     Text("تفسیر", fontWeight = FontWeight.Bold)
                     Text(verse.tafsirText)
@@ -790,7 +804,52 @@ fun DatabaseLoadingScreen() {
 }
 
 @Composable
-fun DatabaseUnavailableScreen(keyMaterialMissing: Boolean) {
+fun DatabaseUnavailableScreen(
+    keyMaterialMissing: Boolean,
+    onRestoreBackup: suspend (ByteArray, CharArray) -> Unit,
+    onRecoveryComplete: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var password by remember { mutableStateOf("") }
+    var pendingPassword by remember { mutableStateOf<CharArray?>(null) }
+    var restoring by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val suppliedPassword = pendingPassword
+        if (uri == null) {
+            suppliedPassword?.fill('\u0000')
+            pendingPassword = null
+            return@rememberLauncherForActivityResult
+        }
+        if (suppliedPassword == null) {
+            error = "گذرواژه بازیابی در دسترس نیست؛ دوباره تلاش کنید."
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            restoring = true
+            val result = runCatching {
+                val bytes = withContext(Dispatchers.IO) { readEncryptedBackup(context, uri) }
+                try {
+                    onRestoreBackup(bytes, suppliedPassword)
+                } finally {
+                    bytes.fill(0)
+                }
+            }
+            suppliedPassword.fill('\u0000')
+            pendingPassword = null
+            restoring = false
+            result.onSuccess {
+                error = null
+                onRecoveryComplete()
+            }.onFailure {
+                error = it.message?.take(180) ?: "بازیابی انجام نشد؛ پایگاه داده قبلی دست‌نخورده باقی مانده است."
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { pendingPassword?.fill('\u0000') }
+    }
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)
@@ -805,7 +864,49 @@ fun DatabaseUnavailableScreen(keyMaterialMissing: Boolean) {
             if (keyMaterialMissing) "اطلاعات کلید محافظت از پایگاه داده یا envelope رمزگذاری‌شده آن پیدا نشد. برای محافظت از اطلاعات، کلید یا passphrase جایگزین ساخته نشده است."
             else "پایگاه داده رمزگذاری‌شده باز نشد. اطلاعات موجود برای جلوگیری از آسیب بیشتر تغییر داده نشده‌اند."
         )
-        Text("برنامه را حذف نصب نکنید و داده‌های آن را پاک نکنید. اگر نسخه پشتیبان رمزگذاری‌شده دارید، فایل و گذرواژه آن را در جای امن نگه دارید؛ بازیابی این وضعیت به بررسی فنی نیاز دارد.")
+        Text("برنامه را حذف نصب نکنید و داده‌های آن را پاک نکنید. اگر نسخه پشتیبان رمزگذاری‌شده دارید، می‌توانید آن را در یک پایگاه داده تازه بازیابی کنید؛ فایل پایگاه داده قبلی حذف یا بازنویسی نمی‌شود.")
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("گذرواژه نسخه پشتیبان") },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            enabled = !restoring && pendingPassword == null,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = {
+                pendingPassword = password.toCharArray()
+                password = ""
+                error = null
+                backupPicker.launch(arrayOf("*/*"))
+            },
+            enabled = password.isNotBlank() && !restoring && pendingPassword == null,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("بازیابی از نسخه پشتیبان رمزگذاری‌شده") }
+        if (restoring) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            Text("اعتبارسنجی و بازیابی اتمیک اطلاعات…")
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+private fun readEncryptedBackup(context: Context, uri: Uri): ByteArray {
+    val input = context.contentResolver.openInputStream(uri) ?: error("فایل پشتیبان قابل خواندن نیست")
+    return input.use { stream ->
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8 * 1024)
+        var total = 0
+        while (true) {
+            val count = stream.read(buffer)
+            if (count < 0) break
+            total += count
+            require(total <= EncryptedBackupCodec.MAX_FILE_BYTES) { "فایل پشتیبان بیش از حد بزرگ است" }
+            output.write(buffer, 0, count)
+        }
+        output.toByteArray()
     }
 }
 

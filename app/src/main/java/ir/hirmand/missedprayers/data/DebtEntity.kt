@@ -88,5 +88,6 @@ data class DailyVerseEntity(
     val tafsirSource: String?,
     val recitationUrl: String?,
     val reciterName: String?,
-    val fetchedAt: Long
+    val fetchedAt: Long,
+    val translationFootnotes: String? = null
 )

@@ -23,3 +23,9 @@ QuranEnc's published reuse conditions require:
 The app displays the source and version supplied by the official API. Text is not
 rewritten or paraphrased. Version values above are the versions verified when
 the integration was implemented; the app reads current metadata at runtime.
+
+The official translation API returns a `footnotes` field alongside each verse.
+The app stores this field verbatim, displays it separately beneath the translation,
+and includes it in encrypted backups. Older cache rows and backup schema versions
+remain readable with a null footnotes value; Room migration 5→6 does not delete
+or rewrite any existing translation text.

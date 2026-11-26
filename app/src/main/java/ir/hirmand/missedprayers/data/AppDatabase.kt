@@ -8,37 +8,164 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-@Database(entities = [PrayerDebtEntity::class, FastingDebtEntity::class, DebtRecordEntity::class, UserProfileEntity::class, ExcusePeriodEntity::class, PlannerSettingsEntity::class, FiqhPreferencesEntity::class, DailyVerseEntity::class], version = 5, exportSchema = true)
+@Database(entities = [PrayerDebtEntity::class, FastingDebtEntity::class, DebtRecordEntity::class, UserProfileEntity::class, ExcusePeriodEntity::class, PlannerSettingsEntity::class, FiqhPreferencesEntity::class, DailyVerseEntity::class], version = 6, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun debtDao(): DebtDao
 
     companion object {
         private const val DATABASE_NAME = "missed_worship.db"
+        private const val DATABASE_SELECTION_PREFERENCES = "database_selection"
+        private const val ACTIVE_DATABASE_KEY = "active_database_name"
+        private const val RECOVERY_DATABASE_PREFIX = "missed_worship_recovered_"
+        private const val RECOVERY_DATABASE_SUFFIX = ".db"
+        private const val PENDING_RECOVERY_PREFIX = "pending_recovery_"
+        private val lock = Any()
         @Volatile private var instance: AppDatabase? = null
+        @Volatile private var activeRecoveryId: String? = null
 
         init {
             // WorkManager may open the encrypted database before MainActivity is created.
             System.loadLibrary("sqlcipher")
         }
 
-        fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
-            val databaseFile = context.getDatabasePath(DATABASE_NAME)
-            val existingDatabase = databaseFile.exists() || File(databaseFile.path + "-wal").exists() || File(databaseFile.path + "-shm").exists()
-            instance ?: Room.databaseBuilder(
-                context.applicationContext,
-                AppDatabase::class.java,
-                DATABASE_NAME
-            ).openHelperFactory(
-                SupportOpenHelperFactory(
+        fun get(context: Context): AppDatabase = synchronized(lock) {
+            check(activeRecoveryId == null) { "بازیابی پایگاه داده در حال اجراست؛ دسترسی هم‌زمان موقتاً متوقف شد." }
+            instance ?: run {
+                val appContext = context.applicationContext
+                cleanupInterruptedRecoveries(appContext)
+                val selectedName = appContext.getSharedPreferences(DATABASE_SELECTION_PREFERENCES, Context.MODE_PRIVATE)
+                    .getString(ACTIVE_DATABASE_KEY, DATABASE_NAME) ?: DATABASE_NAME
+                val recoveryId = if (selectedName == DATABASE_NAME) null else {
+                    val id = selectedName.removePrefix(RECOVERY_DATABASE_PREFIX).removeSuffix(RECOVERY_DATABASE_SUFFIX)
+                    check(selectedName == "$RECOVERY_DATABASE_PREFIX$id$RECOVERY_DATABASE_SUFFIX" && id.matches(Regex("[0-9a-f]{32}"))) {
+                        "شناسه پایگاه داده بازیابی‌شده معتبر نیست؛ از ساخت دیتابیس جایگزین خودداری شد."
+                    }
+                    id
+                }
+                val databaseFile = appContext.getDatabasePath(selectedName)
+                val existingDatabase = databaseFile.exists() || File(databaseFile.path + "-wal").exists() || File(databaseFile.path + "-shm").exists()
+                check(recoveryId == null || databaseFile.exists()) {
+                    "فایل پایگاه داده بازیابی‌شده پیدا نشد؛ از ساخت دیتابیس خالی به‌جای اطلاعات بازیابی‌شده خودداری شد."
+                }
+                val keyProvider = if (recoveryId == null) {
+                    DatabaseKeyProvider(appContext, requireExistingDatabaseKey = existingDatabase)
+                } else {
+                    DatabaseKeyProvider(
+                        appContext,
+                        preferencesName = "database_key_recovery_$recoveryId",
+                        keyAlias = "missed_worship_recovery_key_$recoveryId",
+                        requireExistingDatabaseKey = true
+                    )
+                }
+                check(existingDatabase || !keyProvider.hasStoredKeyMaterial()) {
+                    "فایل پایگاه داده وجود ندارد اما مواد کلید آن باقی مانده است؛ برای جلوگیری از ایجاد دیتابیس خالی، راه‌اندازی متوقف شد."
+                }
+                Room.databaseBuilder(
+                    appContext,
+                    AppDatabase::class.java,
+                    selectedName
+                ).openHelperFactory(
+                    SupportOpenHelperFactory(keyProvider.getOrCreatePassphrase())
+                )
+                    .addMigrations(*MIGRATIONS)
+                    .build().also { instance = it }
+            }
+        }
+
+        /** Restores into a fresh encrypted database, then atomically switches the active database pointer. */
+        @Suppress("ApplySharedPref", "UseKtx") // Synchronous commits are required before DB creation and when switching the active DB pointer.
+        suspend fun restoreFromBackup(context: Context, encryptedBackup: ByteArray, password: CharArray) = withContext(Dispatchers.IO) {
+            require(encryptedBackup.size <= EncryptedBackupCodec.MAX_FILE_BYTES) { "فایل پشتیبان بیش از حد بزرگ است" }
+            val appContext = context.applicationContext
+            val recoveryId = UUID.randomUUID().toString().replace("-", "")
+            val recoveryName = "$RECOVERY_DATABASE_PREFIX$recoveryId$RECOVERY_DATABASE_SUFFIX"
+            val selectionPreferences = appContext.getSharedPreferences(DATABASE_SELECTION_PREFERENCES, Context.MODE_PRIVATE)
+            val pendingKey = "$PENDING_RECOVERY_PREFIX$recoveryId"
+            val keyProvider = DatabaseKeyProvider(
+                appContext,
+                preferencesName = "database_key_recovery_$recoveryId",
+                keyAlias = "missed_worship_recovery_key_$recoveryId"
+            )
+            synchronized(lock) {
+                check(activeRecoveryId == null) { "بازیابی دیگری در حال اجراست؛ کمی بعد دوباره تلاش کنید." }
+                check(selectionPreferences.edit().putString(pendingKey, recoveryName).commit()) {
+                    "ثبت وضعیت موقت بازیابی انجام نشد؛ دیتابیس قبلی تغییری نکرد."
+                }
+                activeRecoveryId = recoveryId
+            }
+            var passphrase: ByteArray? = null
+            var recoveryDatabase: AppDatabase? = null
+            var activated = false
+            try {
+                val databasePassphrase = keyProvider.getOrCreatePassphrase()
+                passphrase = databasePassphrase
+                val newDatabase = Room.databaseBuilder(appContext, AppDatabase::class.java, recoveryName)
+                    .openHelperFactory(SupportOpenHelperFactory(databasePassphrase))
+                    .addMigrations(*MIGRATIONS)
+                    .build()
+                recoveryDatabase = newDatabase
+                newDatabase.openHelper.writableDatabase
+                EncryptedBackupManager(newDatabase).restoreBackup(encryptedBackup, password)
+                newDatabase.close()
+                synchronized(lock) {
+                    runCatching { instance?.close() }
+                    instance = null
+                }
+                val pointerCommitted = selectionPreferences.edit()
+                    .putString(ACTIVE_DATABASE_KEY, recoveryName)
+                    .remove(pendingKey)
+                    .commit()
+                if (pointerCommitted) activated = true
+                check(pointerCommitted) { "ثبت پایگاه داده بازیابی‌شده انجام نشد؛ دیتابیس قبلی همچنان فعال است." }
+            } finally {
+                if (!activated) {
+                    runCatching { recoveryDatabase?.close() }
+                    appContext.deleteDatabase(recoveryName)
+                    keyProvider.deleteKeyMaterial()
+                    selectionPreferences.edit().remove(pendingKey).commit()
+                }
+                passphrase?.fill(0)
+                synchronized(lock) { activeRecoveryId = null }
+            }
+        }
+
+        @Suppress("ApplySharedPref", "UseKtx") // Cleanup must be durably recorded before startup proceeds.
+        private fun cleanupInterruptedRecoveries(context: Context) {
+            val preferences = context.getSharedPreferences(DATABASE_SELECTION_PREFERENCES, Context.MODE_PRIVATE)
+            val pendingKeys = preferences.all.keys.filter { it.startsWith(PENDING_RECOVERY_PREFIX) }
+            if (pendingKeys.isEmpty()) return
+            val editor = preferences.edit()
+            pendingKeys.forEach { pendingKey ->
+                val id = pendingKey.removePrefix(PENDING_RECOVERY_PREFIX)
+                val expectedName = "$RECOVERY_DATABASE_PREFIX$id$RECOVERY_DATABASE_SUFFIX"
+                if (id == activeRecoveryId) return@forEach
+                if (id.matches(Regex("[0-9a-f]{32}")) && preferences.getString(pendingKey, null) == expectedName) {
+                    context.deleteDatabase(expectedName)
                     DatabaseKeyProvider(
                         context,
-                        requireExistingDatabaseKey = existingDatabase
-                    ).getOrCreatePassphrase()
-                )
-            )
-                .addMigrations(*MIGRATIONS)
-                .build().also { instance = it }
+                        preferencesName = "database_key_recovery_$id",
+                        keyAlias = "missed_worship_recovery_key_$id",
+                        requireExistingDatabaseKey = true
+                    ).deleteKeyMaterial()
+                }
+                editor.remove(pendingKey)
+            }
+            editor.commit()
+        }
+
+        internal fun clearActiveInstanceForTests() {
+            synchronized(lock) {
+                runCatching { instance?.close() }
+                instance = null
+            }
+        }
+
+        internal fun cleanupInterruptedRecoveriesForTests(context: Context) {
+            synchronized(lock) { cleanupInterruptedRecoveries(context.applicationContext) }
         }
 
         internal val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -71,6 +198,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        internal val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE daily_verses ADD COLUMN translationFootnotes TEXT")
+            }
+        }
+
+        internal val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
     }
 }

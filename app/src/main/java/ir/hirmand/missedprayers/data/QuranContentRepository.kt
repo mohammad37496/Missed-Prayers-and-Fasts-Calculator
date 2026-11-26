@@ -135,7 +135,13 @@ class QuranContentRepository(
         require(surahNumber in 1..114 && ayahNumber in 1..286) { "شماره سوره یا آیه از منبع معتبر نیست" }
         val arabic = arabicTextProvider.getAyah(surahNumber, ayahNumber)
         val translation = selected.optString("translation")
+        val footnotesValue = selected.opt("footnotes")
+        require(footnotesValue is String) { "پانوشت‌های اصلی مترجم از QuranEnc دریافت نشد" }
+        val translationFootnotes = footnotesValue.takeIf(String::isNotBlank)
         require(!arabic.isNullOrBlank() && translation.isNotBlank()) { "متن آیه از Tanzil یا ترجمه فارسی از QuranEnc ناقص است" }
+        require(arabic.length <= 5_000 && translation.length <= 5_000 && (translationFootnotes == null || translationFootnotes.length <= 16_000)) {
+            "متن آیه یا پانوشت‌های مترجم از حد مجاز طول بیشتر است"
+        }
 
         val tafsirMeta = optionalContent { findTafsir(contentProvider.listTafsirs()) }
         val tafsir = tafsirMeta?.let { meta ->
@@ -154,6 +160,7 @@ class QuranContentRepository(
             dayKey = date.toString(), surah = surahNumber, ayah = ayahNumber, globalNumber = globalNumber,
             arabicText = arabic, persianTranslation = translation,
             translationSource = "$translationTitle · QuranEnc.com", translationVersion = translationVersion,
+            translationFootnotes = translationFootnotes,
             tafsirText = tafsir,
             tafsirSource = if (tafsir != null) tafsirMeta?.let { "${it.optString("title")} · QuranEnc.com · نسخه ${it.optString("version", "نامشخص")}" } else null,
             recitationUrl = audio?.url?.takeIf(::isAllowedRecitationUrl), reciterName = audio?.reciterName, fetchedAt = System.currentTimeMillis()

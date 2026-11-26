@@ -12,7 +12,7 @@ class EncryptedBackupManager(private val database: AppDatabase) {
     suspend fun createBackup(password: CharArray): ByteArray = withContext(Dispatchers.IO) {
         val payload = database.withTransaction {
         val dao = database.debtDao()
-        val payload = JSONObject().put("schemaVersion", 5).put("createdAt", System.currentTimeMillis())
+        val payload = JSONObject().put("schemaVersion", 6).put("createdAt", System.currentTimeMillis())
         payload.put("prayers", JSONArray().also { array -> dao.getAllPrayers().forEach { array.put(JSONObject().put("type", it.prayerType).put("total", it.total).put("completed", it.completed).put("updatedAt", it.updatedAt)) } })
         payload.put("fasting", dao.getFastingSnapshot()?.let { JSONObject().put("total", it.total).put("completed", it.completed).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
         payload.put("records", JSONArray().also { array -> dao.getAllRecords().forEach { array.put(JSONObject().put("id", it.id).put("kind", it.kind).put("reference", it.reference).put("amount", it.amount).put("createdAt", it.createdAt).put("beforeCompleted", it.beforeCompleted).put("afterCompleted", it.afterCompleted)) } })
@@ -20,7 +20,7 @@ class EncryptedBackupManager(private val database: AppDatabase) {
         payload.put("periods", JSONArray().also { array -> dao.getAllExcusePeriods().forEach { array.put(JSONObject().put("id", it.id).put("kind", it.kind).put("startDate", it.startDate).put("endDate", it.endDate).put("note", it.note ?: JSONObject.NULL).put("createdAt", it.createdAt)) } })
         payload.put("planner", dao.getPlannerSettingsSnapshot()?.let { JSONObject().put("dailyPrayerTarget", it.dailyPrayerTarget).put("dailyFastingTarget", it.dailyFastingTarget).put("activeWeekdaysMask", it.activeWeekdaysMask).put("reminderEnabled", it.reminderEnabled).put("reminderHour", it.reminderHour).put("reminderMinute", it.reminderMinute).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
         payload.put("fiqh", dao.getFiqhPreferencesSnapshot()?.let { JSONObject().put("marjaId", it.marjaId ?: JSONObject.NULL).put("rulesetVersion", it.rulesetVersion ?: JSONObject.NULL).put("acceptedSourceUrl", it.acceptedSourceUrl ?: JSONObject.NULL).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
-        payload.put("dailyVerses", JSONArray().also { array -> dao.getAllDailyVerses().forEach { array.put(JSONObject().put("dayKey", it.dayKey).put("surah", it.surah).put("ayah", it.ayah).put("globalNumber", it.globalNumber).put("arabicText", it.arabicText).put("persianTranslation", it.persianTranslation).put("translationSource", it.translationSource).put("translationVersion", it.translationVersion).put("tafsirText", it.tafsirText ?: JSONObject.NULL).put("tafsirSource", it.tafsirSource ?: JSONObject.NULL).put("recitationUrl", it.recitationUrl ?: JSONObject.NULL).put("reciterName", it.reciterName ?: JSONObject.NULL).put("fetchedAt", it.fetchedAt)) } })
+        payload.put("dailyVerses", JSONArray().also { array -> dao.getAllDailyVerses().forEach { array.put(JSONObject().put("dayKey", it.dayKey).put("surah", it.surah).put("ayah", it.ayah).put("globalNumber", it.globalNumber).put("arabicText", it.arabicText).put("persianTranslation", it.persianTranslation).put("translationSource", it.translationSource).put("translationVersion", it.translationVersion).put("translationFootnotes", it.translationFootnotes ?: JSONObject.NULL).put("tafsirText", it.tafsirText ?: JSONObject.NULL).put("tafsirSource", it.tafsirSource ?: JSONObject.NULL).put("recitationUrl", it.recitationUrl ?: JSONObject.NULL).put("reciterName", it.reciterName ?: JSONObject.NULL).put("fetchedAt", it.fetchedAt)) } })
         payload
         }
         val plain = payload.toString().toByteArray(Charsets.UTF_8)
@@ -37,7 +37,7 @@ class EncryptedBackupManager(private val database: AppDatabase) {
         try {
         val root = JSONObject(plain.toString(Charsets.UTF_8))
         val backupVersion = root.getInt("schemaVersion")
-        require(backupVersion in 4..5) { "نسخه ساختار فایل پشتیبان پشتیبانی نمی‌شود" }
+        require(backupVersion in 4..6) { "نسخه ساختار فایل پشتیبان پشتیبانی نمی‌شود" }
         val prayers = root.getJSONArray("prayers").toEntities { item ->
             val type = item.getString("type")
             require(type in setOf("FAJR", "DHUHR", "ASR", "MAGHRIB", "ISHA"))
@@ -103,9 +103,26 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             LocalDate.parse(item.getString("dayKey"))
             val surah = item.getInt("surah"); val ayah = item.getInt("ayah"); val global = item.getInt("globalNumber")
             require(surah in 1..114 && ayah in 1..286 && global in 1..6236)
+            if (backupVersion >= 6) require(item.has("translationFootnotes"))
+            val arabicText = item.getString("arabicText")
+            val translation = item.getString("persianTranslation")
+            val translationSource = item.getString("translationSource")
+            val translationVersion = item.getString("translationVersion")
+            val footnotes = item.optNullableString("translationFootnotes")
+            val tafsirText = item.optNullableString("tafsirText")
+            val tafsirSource = item.optNullableString("tafsirSource")
+            val reciterName = item.optNullableString("reciterName")
+            require(arabicText.isNotBlank() && arabicText.length <= 5_000)
+            require(translation.isNotBlank() && translation.length <= 5_000)
+            require(translationSource.isNotBlank() && translationSource.length <= 240)
+            require(translationVersion.isNotBlank() && translationVersion.length <= 80)
+            require(footnotes == null || footnotes.length <= 16_000)
+            require(tafsirText == null || tafsirText.length <= 8_000)
+            require(tafsirSource == null || tafsirSource.length <= 240)
+            require(reciterName == null || reciterName.length <= 120)
             val audio = item.optNullableString("recitationUrl")
             require(audio == null || runCatching { java.net.URI(audio).let { it.scheme == "https" && it.userInfo == null && it.port in listOf(-1, 443) && it.host in setOf("download.quranicaudio.com", "audio.qurancdn.com") } }.getOrDefault(false))
-            DailyVerseEntity(item.getString("dayKey"), surah, ayah, global, item.getString("arabicText").take(5000), item.getString("persianTranslation").take(5000), item.getString("translationSource").take(240), item.getString("translationVersion").take(80), item.optNullableString("tafsirText")?.take(8000), item.optNullableString("tafsirSource")?.take(240), audio, item.optNullableString("reciterName")?.take(120), item.getLong("fetchedAt"))
+            DailyVerseEntity(item.getString("dayKey"), surah, ayah, global, arabicText, translation, translationSource, translationVersion, tafsirText, tafsirSource, audio, reciterName, item.getLong("fetchedAt"), footnotes)
         }
         require(verses.size <= 60 && verses.map { it.dayKey }.distinct().size == verses.size)
 

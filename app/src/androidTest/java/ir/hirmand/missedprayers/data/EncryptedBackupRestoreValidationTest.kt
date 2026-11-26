@@ -10,12 +10,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDate
+import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class EncryptedBackupRestoreValidationTest {
@@ -246,5 +250,152 @@ class EncryptedBackupRestoreValidationTest {
         assertEquals("WOMAN", dao.getProfileSnapshot()?.gender)
         assertEquals(40, dao.getPrayer("FAJR")?.total)
         assertEquals(10, dao.getPrayer("FAJR")?.completed)
+    }
+
+    @Test fun recoveryActivatesANewEncryptedDatabaseAndLeavesThePreviousFileUntouched() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val selection = context.getSharedPreferences("database_selection", Context.MODE_PRIVATE)
+        val previousActiveName = selection.getString("active_database_name", null)
+        val previousActiveFile = previousActiveName?.let(context::getDatabasePath)
+        val previousActiveBytes = previousActiveFile?.takeIf { it.exists() }?.readBytes()
+        val primaryFile = context.getDatabasePath("missed_worship.db")
+        val previousPrimaryBytes = primaryFile.takeIf { it.exists() }?.readBytes()
+        val password = "new-database-recovery-test".toCharArray()
+        val sourceDao = database.debtDao()
+        sourceDao.saveProfile(
+            UserProfileEntity(
+                displayName = "Recovered profile",
+                gender = "MAN",
+                taklifStartDate = "2000-01-01",
+                taklifEndDate = null,
+                timezoneId = "Europe/Oslo",
+                calendarPreference = "GREGORIAN",
+                marjaId = null,
+                updatedAt = 3_000L
+            )
+        )
+        sourceDao.savePrayer(PrayerDebtEntity("FAJR", 35, 12, 3_000L))
+        val backup = EncryptedBackupManager(database).createBackup(password)
+        var recoveredName: String? = null
+
+        try {
+            AppDatabase.clearActiveInstanceForTests()
+            AppDatabase.restoreFromBackup(context, backup, password)
+            recoveredName = selection.getString("active_database_name", null)
+            assertTrue(recoveredName?.startsWith("missed_worship_recovered_") == true)
+            val recoveredDatabase = AppDatabase.get(context)
+            assertEquals("Recovered profile", recoveredDatabase.debtDao().getProfileSnapshot()?.displayName)
+            assertEquals(35, recoveredDatabase.debtDao().getPrayer("FAJR")?.total)
+            assertEquals(12, recoveredDatabase.debtDao().getPrayer("FAJR")?.completed)
+            if (previousPrimaryBytes == null) assertFalse(primaryFile.exists())
+            else assertArrayEquals(previousPrimaryBytes, primaryFile.readBytes())
+            if (previousActiveFile != null) {
+                if (previousActiveBytes == null) assertFalse(previousActiveFile.exists())
+                else assertArrayEquals(previousActiveBytes, previousActiveFile.readBytes())
+            }
+        } finally {
+            password.fill('\u0000')
+            AppDatabase.clearActiveInstanceForTests()
+            if (previousActiveName == null) selection.edit().remove("active_database_name").commit()
+            else selection.edit().putString("active_database_name", previousActiveName).commit()
+            recoveredName?.let { name ->
+                context.deleteDatabase(name)
+                val id = name.removePrefix("missed_worship_recovered_").removeSuffix(".db")
+                DatabaseKeyProvider(
+                    context,
+                    preferencesName = "database_key_recovery_$id",
+                    keyAlias = "missed_worship_recovery_key_$id",
+                    requireExistingDatabaseKey = true
+                ).deleteKeyMaterial()
+            }
+        }
+    }
+
+    @Test fun invalidRecoveryDoesNotSwitchActiveDatabaseOrLeaveTemporaryFiles() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val selection = context.getSharedPreferences("database_selection", Context.MODE_PRIVATE)
+        val previousActiveName = selection.getString("active_database_name", null)
+        val databaseDirectory = context.getDatabasePath("missed_worship.db").parentFile!!
+        val recoveryFilesBefore = databaseDirectory.listFiles()
+            .orEmpty().filter { it.name.startsWith("missed_worship_recovered_") }.map { it.name }.toSet()
+        val password = "invalid-recovery-test".toCharArray()
+
+        try {
+            assertThrows(RuntimeException::class.java) {
+                runBlocking { AppDatabase.restoreFromBackup(context, byteArrayOf(1, 2, 3, 4), password) }
+            }
+            assertEquals(previousActiveName, selection.getString("active_database_name", null))
+            val recoveryFilesAfter = databaseDirectory.listFiles()
+                .orEmpty().filter { it.name.startsWith("missed_worship_recovered_") }.map { it.name }.toSet()
+            assertEquals(recoveryFilesBefore, recoveryFilesAfter)
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
+    @Test fun interruptedRecoveryIsCleanedWithoutTouchingTheActiveDatabase() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val id = UUID.randomUUID().toString().replace("-", "")
+        val recoveryName = "missed_worship_recovered_$id.db"
+        val preferencesName = "database_key_recovery_$id"
+        val keyAlias = "missed_worship_recovery_key_$id"
+        val recoveryFile = context.getDatabasePath(recoveryName)
+        recoveryFile.parentFile?.mkdirs()
+        recoveryFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+        val keyProvider = DatabaseKeyProvider(context, preferencesName, keyAlias)
+        keyProvider.getOrCreatePassphrase().fill(0)
+        val selection = context.getSharedPreferences("database_selection", Context.MODE_PRIVATE)
+        val pendingKey = "pending_recovery_$id"
+        assertTrue(selection.edit().putString(pendingKey, recoveryName).commit())
+
+        AppDatabase.cleanupInterruptedRecoveriesForTests(context)
+
+        assertFalse(recoveryFile.exists())
+        assertFalse(selection.contains(pendingKey))
+        assertFalse(keyProvider.hasStoredKeyMaterial())
+    }
+
+    @Test fun quranEncTranslationFootnotesAreStoredVerbatimAndSurviveEncryptedBackupRestore() = runBlocking {
+        val footnotes = "[۱] پانوشت نخست، با حفظ خط و نشانه‌گذاری منبع.\n[۲] پانوشت دوم."
+        val provider = object : QuranEncContentProvider {
+            override fun listTranslations() = JSONArray().put(
+                JSONObject()
+                    .put("key", "persian_ih")
+                    .put("language_iso_code", "fa")
+                    .put("version", "1.1.3")
+                    .put("title", "Persian Translation - Rowwad Translation Center")
+            )
+            override fun listTafsirs() = JSONArray()
+            override fun translationForSurah(key: String, surah: Int) = JSONArray().put(
+                JSONObject()
+                    .put("id", "1")
+                    .put("sura", "1")
+                    .put("aya", "1")
+                    .put("translation", "ترجمه فارسی عین منبع")
+                    .put("footnotes", footnotes)
+            )
+            override fun tafsirForAyah(key: String, surah: Int, ayah: Int) = JSONArray()
+        }
+        val repository = QuranContentRepository(
+            database.debtDao(),
+            object : ArabicQuranTextProvider {
+                override fun getAyah(surah: Int, ayah: Int) = "بِسْمِ اللَّهِ"
+            },
+            contentProvider = provider
+        )
+        val day = LocalDate.parse("2026-11-26")
+        val loaded = repository.loadFor(day, forceRefresh = true)
+        assertEquals(footnotes, loaded.verse?.translationFootnotes)
+
+        val password = "quran-footnotes-backup-test".toCharArray()
+        try {
+            val manager = EncryptedBackupManager(database)
+            val backup = manager.createBackup(password)
+            database.debtDao().clearDailyVerses()
+            manager.restoreBackup(backup, password)
+            assertEquals(footnotes, database.debtDao().getDailyVerse(day.toString())?.translationFootnotes)
+        } finally {
+            password.fill('\u0000')
+        }
     }
 }
