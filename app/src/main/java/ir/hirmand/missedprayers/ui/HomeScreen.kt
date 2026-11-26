@@ -176,7 +176,8 @@ fun HomeScreen(viewModel: DebtViewModel) {
                             }
                         }
                         "reports" -> ReportsScreen(prayers, fasting, viewModel.allRecords.collectAsState().value)
-                        "more" -> MoreScreen(onProfile = { selectedTab = "profile" }, onFiqh = { selectedTab = "settings" }, onBackup = { selectedTab = "backup" })
+                        "more" -> MoreScreen(onProfile = { selectedTab = "profile" }, onFiqh = { selectedTab = "settings" }, onBackup = { selectedTab = "backup" }, onHelp = { selectedTab = "help" })
+                        "help" -> HelpScreen()
                         "profile" -> ProfileScreen(profile, periods, { value -> viewModel.saveProfile(value) { error = it } },
                             { kind, start, end, note -> viewModel.addExcusePeriod(kind, start, end, note) { error = it } }, viewModel::deleteExcusePeriod,
                             { prayerDays, fastingDays -> viewModel.applyRawDateEstimate(prayerDays, fastingDays) { error = it }; selectedTab = "dashboard" })

@@ -491,12 +491,68 @@ fun BackupScreen(status: String?, onCreate: (String) -> Unit, onRestore: (String
 }
 
 @Composable
-fun MoreScreen(onProfile: () -> Unit, onFiqh: () -> Unit, onBackup: () -> Unit) {
+fun MoreScreen(onProfile: () -> Unit, onFiqh: () -> Unit, onBackup: () -> Unit, onHelp: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("بخش‌های بیشتر", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Button(onClick = onProfile, modifier = Modifier.fillMaxWidth()) { Text("پروفایل و اطلاعات برآورد") }
         Button(onClick = onFiqh, modifier = Modifier.fillMaxWidth()) { Text("تنظیمات فقهی و مدیریت داده‌ها") }
         Button(onClick = onBackup, modifier = Modifier.fillMaxWidth()) { Text("پشتیبان‌گیری و بازیابی امن") }
+        OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) { Text("راهنما و پرسش‌های متداول") }
+    }
+}
+
+@Composable
+fun HelpScreen() {
+    LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("راهنمای استفاده", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+        item {
+            Card {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("۱. ثبت برآورد اولیه", fontWeight = FontWeight.Bold)
+                    Text("در پروفایل، اطلاعات لازم و بازه تقریبی را وارد کنید. برآورد حاصل تخمینی برای برنامه‌ریزی شخصی است؛ می‌توانید آن را اصلاح کنید و تعدادهای انجام‌شده و سوابق عذرها حفظ می‌شوند.")
+                }
+            }
+        }
+        item {
+            Card {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("۲. ثبت انجام نماز و روزه", fontWeight = FontWeight.Bold)
+                    Text("از صفحه خانه، نوع نماز یا روزه و تعداد را ثبت کنید. اصلاح‌های بعدی در تاریخچه می‌مانند. بازگردانی فقط وقتی انجام می‌شود که وضعیت فعلی هنوز با همان ثبت سازگار باشد.")
+                }
+            }
+        }
+        item {
+            Card {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("۳. برنامه‌ریزی و یادآورها", fontWeight = FontWeight.Bold)
+                    Text("در صفحه برنامه، هدف روزانه و روزهای فعال را انتخاب کنید. برای نمایش اعلان باید مجوز اعلان اندروید فعال باشد؛ محدودیت باتری یا حالت Doze ممکن است زمان اعلان را جابه‌جا کند.")
+                }
+            }
+        }
+        item {
+            Card {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("۴. تقویم و تاریخ‌ها", fontWeight = FontWeight.Bold)
+                    Text("تقویم برنامه تاریخ شمسی، میلادی و قمری محاسباتی را کنار هم نشان می‌دهد. تاریخ قمری محاسباتی ممکن است با رؤیت هلال یا تقویم رسمی محل زندگی متفاوت باشد.")
+                }
+            }
+        }
+        item {
+            Card {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("۵. نسخه پشتیبان", fontWeight = FontWeight.Bold)
+                    Text("فایل پشتیبان با گذرواژه‌ای که خودتان تعیین می‌کنید رمزگذاری می‌شود. گذرواژه را خارج از دستگاه در جای امن نگه دارید؛ بدون آن بازیابی ممکن نیست. پیش از بازیابی، جایگزینی کامل اطلاعات فعلی را بررسی کنید.")
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("یادآوری فقهی مهم", fontWeight = FontWeight.Bold)
+                    Text("این برنامه ابزار ثبت و برآورد شخصی است، نه مرجع صدور فتوا. تا زمانی که مرجع تقلید انتخاب و قواعد رسمی او با منبع قابل‌ردیابی بررسی نشده باشند، درباره عادت ماهانه، نفاس، کفاره، فدیه یا مقدار شرعی بدهی حکم قطعی صادر نمی‌شود.")
+                }
+            }
+        }
     }
 }
 
