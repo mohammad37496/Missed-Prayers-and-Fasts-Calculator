@@ -130,4 +130,37 @@ class EncryptedBackupIntegrationTest {
         assertEquals(cached, result.verse)
         assertEquals(null, result.message)
     }
+
+    @Test fun changingProfileAndEstimatePreservesExcuseHistoryAndCompletedCounts() = runBlocking {
+        val repository = DebtRepository(database)
+        repository.saveProfile(
+            UserProfileEntity(
+                displayName = null, gender = "WOMAN", taklifStartDate = "2010-01-01",
+                taklifEndDate = null, timezoneId = "Asia/Tehran",
+                calendarPreference = "PERSIAN", marjaId = null, updatedAt = 1_000L
+            )
+        )
+        repository.addExcusePeriod(
+            "MENSTRUATION", LocalDate.parse("2020-01-10"),
+            LocalDate.parse("2020-01-14"), "ثبت خصوصی کاربر"
+        )
+        repository.initializePrayer(ir.hirmand.missedprayers.domain.PrayerType.FAJR, 40, 10)
+        repository.initializeFasting(20, 5)
+
+        repository.applyRawDateEstimate(prayerPerType = 50, fastingDays = 30)
+        repository.saveProfile(
+            UserProfileEntity(
+                displayName = null, gender = "MAN", taklifStartDate = "2012-01-01",
+                taklifEndDate = null, timezoneId = "Asia/Tehran",
+                calendarPreference = "PERSIAN", marjaId = null, updatedAt = 2_000L
+            )
+        )
+
+        assertEquals(10, database.debtDao().getPrayer("FAJR")?.completed)
+        assertEquals(50, database.debtDao().getPrayer("FAJR")?.total)
+        assertEquals(5, database.debtDao().getFasting()?.completed)
+        assertEquals(30, database.debtDao().getFasting()?.total)
+        assertEquals("MENSTRUATION", database.debtDao().getAllExcusePeriods().single().kind)
+        assertEquals("2020-01-10", database.debtDao().getAllExcusePeriods().single().startDate)
+    }
 }
