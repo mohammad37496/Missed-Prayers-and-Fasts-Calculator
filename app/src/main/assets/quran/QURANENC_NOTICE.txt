@@ -32,6 +32,12 @@ gate: obtain source-specific confirmation for republication of this tafsir befor
 public distribution. Do not treat the translation conditions alone as definitive
 proof of tafsir republication rights.
 
+Build policy: Persian As-Saadi tafsir and recitation audio are debug-only. Release
+builds do not request or display these items and omit them when exporting or
+restoring encrypted backups. Existing cached/backup values are not exposed by a
+release build. This gate remains until the relevant publisher terms and audio
+source licence are independently confirmed.
+
 The official translation API returns a `footnotes` field alongside each verse.
 The app stores this field verbatim, displays it separately beneath the translation,
 and includes it in encrypted backups. Older cache rows and backup schema versions

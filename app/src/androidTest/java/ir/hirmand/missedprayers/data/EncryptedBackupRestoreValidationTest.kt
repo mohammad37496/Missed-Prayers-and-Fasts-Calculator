@@ -36,6 +36,95 @@ class EncryptedBackupRestoreValidationTest {
 
     @After fun tearDown() { database.close() }
 
+    @Test fun releaseSafeContentModeDoesNotRequestOrExposeUnverifiedTafsirOrAudio() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        var tafsirCatalogueCalls = 0
+        var recitationCalls = 0
+        val provider = object : QuranEncContentProvider {
+            override fun listTranslations() = JSONArray().put(
+                JSONObject().put("key", "persian_ih").put("title", "ترجمه فارسی - مرکز ترجمه رواد")
+                    .put("version", "1.1.3").put("language_iso_code", "fa")
+            )
+            override fun listTafsirs(): JSONArray {
+                tafsirCatalogueCalls++
+                return JSONArray().put(JSONObject().put("key", "persian_saadi").put("title", "تفسیر سعدی").put("version", "1.0.0").put("language_iso_code", "fa"))
+            }
+            override fun translationForSurah(key: String, surah: Int) = JSONArray().put(
+                JSONObject().put("id", "1").put("sura", surah.toString()).put("aya", "1")
+                    .put("translation", "ترجمه معتبر").put("footnotes", "")
+            )
+            override fun tafsirForAyah(key: String, surah: Int, ayah: Int) = JSONArray()
+                .put(JSONObject().put("type", "تفسير آية").put("from_aya", ayah).put("to_aya", ayah).put("text", "تفسیر آزمایشی"))
+        }
+        val recitation = object : QuranRecitationProvider {
+            override suspend fun resolve(globalAyahNumber: Int): RecitationAudio? {
+                recitationCalls++
+                return RecitationAudio("https://download.quranicaudio.com/test.mp3", "قاری آزمایشی", "test")
+            }
+        }
+        val repository = QuranContentRepository(
+            database.debtDao(), TanzilAssetTextProvider(context.assets), recitation, provider,
+            allowUnverifiedMedia = false
+        )
+
+        val result = repository.loadFor(LocalDate.parse("2026-11-26"), forceRefresh = true)
+
+        assertEquals("ترجمه معتبر", result.verse?.persianTranslation)
+        assertNull(result.verse?.tafsirText)
+        assertNull(result.verse?.tafsirSource)
+        assertNull(result.verse?.recitationUrl)
+        assertNull(result.verse?.reciterName)
+        assertEquals(0, tafsirCatalogueCalls)
+        assertEquals(0, recitationCalls)
+
+        database.debtDao().saveDailyVerse(
+            result.verse!!.copy(
+                tafsirText = "مقدار قدیمی ذخیره‌شده", tafsirSource = "منبع قدیمی",
+                recitationUrl = "https://download.quranicaudio.com/legacy.mp3", reciterName = "قاری قدیمی"
+            )
+        )
+        val cached = repository.loadFor(LocalDate.parse("2026-11-26"), forceRefresh = false)
+        assertNull(cached.verse?.tafsirText)
+        assertNull(cached.verse?.tafsirSource)
+        assertNull(cached.verse?.recitationUrl)
+        assertNull(cached.verse?.reciterName)
+    }
+
+    @Test fun releaseSafeBackupOmitsAndDoesNotRestoreUnverifiedMedia() = runBlocking {
+        val dao = database.debtDao()
+        dao.saveDailyVerse(
+            DailyVerseEntity(
+                dayKey = "2026-11-26", surah = 1, ayah = 1, globalNumber = 1,
+                arabicText = "بِسْمِ اللَّهِ", persianTranslation = "به نام خدا",
+                translationSource = "QuranEnc · Rowwad", translationVersion = "1.1.3",
+                tafsirText = "تفسیر آزمایشی", tafsirSource = "QuranEnc · As-Saadi",
+                recitationUrl = "https://download.quranicaudio.com/test.mp3", reciterName = "قاری آزمایشی",
+                fetchedAt = 1_000L
+            )
+        )
+        val developmentBackup = EncryptedBackupManager(database, includeUnverifiedMedia = true)
+            .createBackup("development-backup-password".toCharArray())
+        val releaseManager = EncryptedBackupManager(database, includeUnverifiedMedia = false)
+        val safeBackup = releaseManager.createBackup("release-backup-password".toCharArray())
+        val safePayload = JSONObject(
+            EncryptedBackupCodec.decrypt(safeBackup, "release-backup-password".toCharArray()).toString(Charsets.UTF_8)
+        )
+        val exportedVerse = safePayload.getJSONArray("dailyVerses").getJSONObject(0)
+        assertTrue(exportedVerse.isNull("tafsirText"))
+        assertTrue(exportedVerse.isNull("tafsirSource"))
+        assertTrue(exportedVerse.isNull("recitationUrl"))
+        assertTrue(exportedVerse.isNull("reciterName"))
+
+        releaseManager.restoreBackup(developmentBackup, "development-backup-password".toCharArray())
+
+        val restored = dao.getDailyVerse("2026-11-26")
+        assertNull(restored?.tafsirText)
+        assertNull(restored?.tafsirSource)
+        assertNull(restored?.recitationUrl)
+        assertNull(restored?.reciterName)
+        assertEquals("به نام خدا", restored?.persianTranslation)
+    }
+
     @Test fun malformedOptionalObjectsAreRejectedWithoutDeletingExistingData() = runBlocking {
         val dao = database.debtDao()
         dao.savePrayer(PrayerDebtEntity("FAJR", 20, 7, 1_000L))

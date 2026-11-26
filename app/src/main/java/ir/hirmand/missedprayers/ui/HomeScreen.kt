@@ -50,11 +50,8 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
-import java.io.ByteArrayOutputStream
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.Duration
@@ -106,51 +103,23 @@ fun HomeScreen(viewModel: DebtViewModel) {
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         notificationPermissionGranted = granted
     }
-    var backupStatus by remember { mutableStateOf<String?>(null) }
+    val backupStatus by viewModel.backupStatus.collectAsState()
     val createBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.hirmand.mwbk")) { uri ->
         val bytes = viewModel.takeBackupForPicker()
-        if (uri != null && bytes != null) scope.launch(Dispatchers.IO) {
-            val saved = try {
-                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("فایل خروجی باز نشد") }
-            } finally {
-                bytes.fill(0)
-            }
-            withContext(Dispatchers.Main) { backupStatus = if (saved.isSuccess) "نسخه پشتیبان رمزگذاری‌شده ذخیره شد." else "ذخیره فایل انجام نشد: ${saved.exceptionOrNull()?.message}" }
+        if (uri != null && bytes != null) {
+            viewModel.saveBackupToUri(context.contentResolver, uri, bytes)
         } else {
             bytes?.fill(0)
-            backupStatus = if (uri == null) "ذخیره نسخه پشتیبان لغو شد." else "اطلاعات موقت نسخه پشتیبان پس از بازسازی برنامه در دسترس نیست؛ دوباره فایل را بسازید."
+            viewModel.setBackupStatus(if (uri == null) "ذخیره نسخه پشتیبان لغو شد." else "اطلاعات موقت نسخه پشتیبان در دسترس نیست؛ دوباره فایل را بسازید.")
         }
     }
     val importBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val password = viewModel.takeRestorePasswordForPicker()
-        if (uri != null && password != null) scope.launch(Dispatchers.IO) {
-            val read = runCatching {
-                val input = context.contentResolver.openInputStream(uri) ?: error("فایل انتخاب‌شده باز نشد")
-                input.use { stream ->
-                    val output = ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    var total = 0
-                    while (true) {
-                        val count = stream.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        require(total <= ir.hirmand.missedprayers.data.EncryptedBackupCodec.MAX_FILE_BYTES) { "فایل پشتیبان بیش از حد بزرگ است" }
-                        output.write(buffer, 0, count)
-                    }
-                    output.toByteArray()
-                }
-            }
-            withContext(Dispatchers.Main) {
-                read.onSuccess { bytes ->
-                    viewModel.restoreBackup(bytes, password) { result ->
-                        bytes.fill(0)
-                        backupStatus = if (result.isSuccess) "بازیابی کامل شد؛ همه داده‌ها در یک تراکنش جایگزین شدند." else "بازیابی انجام نشد: ${result.exceptionOrNull()?.message}"
-                    }
-                }.onFailure { password.fill('\u0000'); backupStatus = "خواندن فایل ناموفق بود: ${it.message}" }
-            }
+        if (uri != null && password != null) {
+            viewModel.restoreBackupFromUri(context.contentResolver, uri, password)
         } else {
             password?.fill('\u0000')
-            backupStatus = if (uri == null) "انتخاب فایل بازیابی لغو شد." else "گذرواژه موقت پس از بازسازی برنامه در دسترس نیست؛ بازیابی را دوباره آغاز کنید."
+            viewModel.setBackupStatus(if (uri == null) "انتخاب فایل بازیابی لغو شد." else "گذرواژه موقت در دسترس نیست؛ بازیابی را دوباره آغاز کنید.")
         }
     }
     val prayers by viewModel.prayers.collectAsState()
@@ -262,7 +231,7 @@ fun HomeScreen(viewModel: DebtViewModel) {
                         "backup" -> BackupScreen(backupStatus,
                             onCreate = { password -> viewModel.createBackup(password.toCharArray()) { result ->
                                 result.onSuccess { bytes -> viewModel.holdBackupForPicker(bytes); createBackupLauncher.launch("missed-worship-backup.mwbk") }
-                                    .onFailure { backupStatus = "ساخت نسخه پشتیبان ناموفق بود: ${it.message}" }
+                                    .onFailure { viewModel.setBackupStatus("ساخت نسخه پشتیبان ناموفق بود: ${it.message}") }
                             } },
                             onRestore = { password -> viewModel.holdRestorePasswordForPicker(password.toCharArray()); importBackupLauncher.launch(arrayOf("application/vnd.hirmand.mwbk", "application/octet-stream", "*/*")) })
                         else -> Dashboard(prayers, fasting, onRecordPrayer = { type, amount -> viewModel.recordPrayer(type, amount) { error = it } },

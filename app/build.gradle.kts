@@ -17,7 +17,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -64,6 +67,14 @@ dependencies {
     androidTestImplementation("androidx.sqlite:sqlite-framework:2.7.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// Room 2.8.5's migration schema serializer uses kotlinx-serialization 1.8.1.
+// Lifecycle 2.10.0 contributes a 1.7.3 strict constraint to AndroidTest; that
+// older runtime lacks GeneratedSerializer.typeParametersSerializers(), causing
+// MigrationTestHelper to fail with AbstractMethodError on device.
+configurations.matching { it.name.contains("AndroidTest") }.configureEach {
+    resolutionStrategy.force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
 }
 
 ksp {

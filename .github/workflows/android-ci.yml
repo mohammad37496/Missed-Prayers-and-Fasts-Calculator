@@ -34,8 +34,8 @@ jobs:
       - name: Install Android platform
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Run unit tests and assemble APK
-        run: ./gradlew --no-daemon testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug lintDebug
+      - name: Run unit tests, compile instrumentation and assemble debug/release APKs
+        run: ./gradlew --no-daemon testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug assembleRelease lint
 
       - name: Detect Linux emulator acceleration
         id: emulator-accel
@@ -73,8 +73,10 @@ jobs:
             app/build/outputs/androidTest-results/connected
           if-no-files-found: warn
 
-      - name: Upload debug APK
+      - name: Upload debug and release APKs
         uses: actions/upload-artifact@v7
         with:
-          name: missed-prayers-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: missed-prayers-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release-unsigned.apk

@@ -1,5 +1,6 @@
 package ir.hirmand.missedprayers.data
 
+import ir.hirmand.missedprayers.BuildConfig
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -8,7 +9,10 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.ZoneId
 
-class EncryptedBackupManager(private val database: AppDatabase) {
+class EncryptedBackupManager(
+    private val database: AppDatabase,
+    private val includeUnverifiedMedia: Boolean = BuildConfig.DEBUG
+) {
     suspend fun createBackup(password: CharArray): ByteArray = withContext(Dispatchers.IO) {
         val payload = database.withTransaction {
         val dao = database.debtDao()
@@ -20,7 +24,7 @@ class EncryptedBackupManager(private val database: AppDatabase) {
         payload.put("periods", JSONArray().also { array -> dao.getAllExcusePeriods().forEach { array.put(JSONObject().put("id", it.id).put("kind", it.kind).put("startDate", it.startDate).put("endDate", it.endDate).put("note", it.note ?: JSONObject.NULL).put("createdAt", it.createdAt)) } })
         payload.put("planner", dao.getPlannerSettingsSnapshot()?.let { JSONObject().put("dailyPrayerTarget", it.dailyPrayerTarget).put("dailyFastingTarget", it.dailyFastingTarget).put("activeWeekdaysMask", it.activeWeekdaysMask).put("reminderEnabled", it.reminderEnabled).put("reminderHour", it.reminderHour).put("reminderMinute", it.reminderMinute).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
         payload.put("fiqh", dao.getFiqhPreferencesSnapshot()?.let { JSONObject().put("marjaId", it.marjaId ?: JSONObject.NULL).put("rulesetVersion", it.rulesetVersion ?: JSONObject.NULL).put("acceptedSourceUrl", it.acceptedSourceUrl ?: JSONObject.NULL).put("updatedAt", it.updatedAt) } ?: JSONObject.NULL)
-        payload.put("dailyVerses", JSONArray().also { array -> dao.getAllDailyVerses().forEach { array.put(JSONObject().put("dayKey", it.dayKey).put("surah", it.surah).put("ayah", it.ayah).put("globalNumber", it.globalNumber).put("arabicText", it.arabicText).put("persianTranslation", it.persianTranslation).put("translationSource", it.translationSource).put("translationVersion", it.translationVersion).put("translationFootnotes", it.translationFootnotes ?: JSONObject.NULL).put("tafsirText", it.tafsirText ?: JSONObject.NULL).put("tafsirSource", it.tafsirSource ?: JSONObject.NULL).put("recitationUrl", it.recitationUrl ?: JSONObject.NULL).put("reciterName", it.reciterName ?: JSONObject.NULL).put("fetchedAt", it.fetchedAt)) } })
+        payload.put("dailyVerses", JSONArray().also { array -> dao.getAllDailyVerses().forEach { array.put(JSONObject().put("dayKey", it.dayKey).put("surah", it.surah).put("ayah", it.ayah).put("globalNumber", it.globalNumber).put("arabicText", it.arabicText).put("persianTranslation", it.persianTranslation).put("translationSource", it.translationSource).put("translationVersion", it.translationVersion).put("translationFootnotes", it.translationFootnotes ?: JSONObject.NULL).put("tafsirText", if (includeUnverifiedMedia) it.tafsirText ?: JSONObject.NULL else JSONObject.NULL).put("tafsirSource", if (includeUnverifiedMedia) it.tafsirSource ?: JSONObject.NULL else JSONObject.NULL).put("recitationUrl", if (includeUnverifiedMedia) it.recitationUrl ?: JSONObject.NULL else JSONObject.NULL).put("reciterName", if (includeUnverifiedMedia) it.reciterName ?: JSONObject.NULL else JSONObject.NULL).put("fetchedAt", it.fetchedAt)) } })
         payload
         }
         val plain = payload.toString().toByteArray(Charsets.UTF_8)
@@ -114,9 +118,9 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             val translationSource = item.getString("translationSource")
             val translationVersion = item.getString("translationVersion")
             val footnotes = item.optNullableString("translationFootnotes")
-            val tafsirText = item.optNullableString("tafsirText")
-            val tafsirSource = item.optNullableString("tafsirSource")
-            val reciterName = item.optNullableString("reciterName")
+            val tafsirText = if (includeUnverifiedMedia) item.optNullableString("tafsirText") else null
+            val tafsirSource = if (includeUnverifiedMedia) item.optNullableString("tafsirSource") else null
+            val reciterName = if (includeUnverifiedMedia) item.optNullableString("reciterName") else null
             require(arabicText.isNotBlank() && arabicText.length <= 5_000)
             require(translation.isNotBlank() && translation.length <= 5_000)
             require(translationSource.isNotBlank() && translationSource.length <= 240)
@@ -125,7 +129,7 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             require(tafsirText == null || tafsirText.length <= 8_000)
             require(tafsirSource == null || tafsirSource.length <= 240)
             require(reciterName == null || reciterName.length <= 120)
-            val audio = item.optNullableString("recitationUrl")
+            val audio = if (includeUnverifiedMedia) item.optNullableString("recitationUrl") else null
             require(audio == null || runCatching { java.net.URI(audio).let { it.scheme == "https" && it.userInfo == null && it.port in listOf(-1, 443) && it.host in setOf("download.quranicaudio.com", "audio.qurancdn.com") } }.getOrDefault(false))
             DailyVerseEntity(item.getString("dayKey"), surah, ayah, global, arabicText, translation, translationSource, translationVersion, tafsirText, tafsirSource, audio, reciterName, item.getLong("fetchedAt"), footnotes)
         }

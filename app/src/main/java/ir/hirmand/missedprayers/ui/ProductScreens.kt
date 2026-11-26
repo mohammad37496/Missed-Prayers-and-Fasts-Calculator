@@ -1,7 +1,6 @@
 package ir.hirmand.missedprayers.ui
 
-import android.content.Context
-import android.net.Uri
+import ir.hirmand.missedprayers.BuildConfig
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +39,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -71,7 +72,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import ir.hirmand.missedprayers.data.DailyVerseResult
-import ir.hirmand.missedprayers.data.EncryptedBackupCodec
 import ir.hirmand.missedprayers.data.ExcusePeriodEntity
 import ir.hirmand.missedprayers.data.FastingDebtEntity
 import ir.hirmand.missedprayers.data.FiqhPreferencesEntity
@@ -91,10 +91,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.Duration
 import java.time.ZonedDateTime
-import java.io.ByteArrayOutputStream
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
@@ -416,7 +413,7 @@ fun CalendarScreen(profile: UserProfileEntity?) {
                     val preferredDate = CalendarDate(shownMonth.year, shownMonth.month, day)
                     val gregorian = CalendarDates.fromPreferred(preferredDate, preference)
                     val isSelected = gregorian == selectedDate
-                    Card(onClick = { selectedDate = gregorian }, shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)) {
+                    Card(onClick = { selectedDate = gregorian }, modifier = Modifier.semantics { selected = isSelected }, shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(day.toString(), fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
                             if (gregorian == today) Text("امروز", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -641,13 +638,13 @@ fun DailyVerseCard(result: DailyVerseResult, onRefresh: () -> Unit) {
     val context = LocalContext.current
     val verse = result.verse
     val player = remember(verse?.recitationUrl) {
-        verse?.recitationUrl?.let { url ->
+        if (BuildConfig.DEBUG) verse?.recitationUrl?.let { url ->
             ExoPlayer.Builder(context).build().apply {
                 setAudioAttributes(PlayerAudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
                 setMediaItem(MediaItem.fromUri(url))
                 prepare()
             }
-        }
+        } else null
     }
     var playing by remember(player) { mutableStateOf(false) }
     DisposableEffect(player) {
@@ -679,10 +676,12 @@ fun DailyVerseCard(result: DailyVerseResult, onRefresh: () -> Unit) {
                     Text("پانوشت‌های مترجم", fontWeight = FontWeight.Bold)
                     Text(footnotes, style = MaterialTheme.typography.bodySmall)
                 }
-                if (verse.tafsirText != null) {
+                if (BuildConfig.DEBUG && verse.tafsirText != null) {
                     Text("تفسیر", fontWeight = FontWeight.Bold)
                     Text(verse.tafsirText)
                     Text("منبع تفسیر: ${verse.tafsirSource}", style = MaterialTheme.typography.labelSmall)
+                } else if (!BuildConfig.DEBUG) {
+                    Text("تفسیر فارسی تا تأیید صریح شرایط بازنشر از سوی ناشر در نسخه انتشار فعال نیست.", style = MaterialTheme.typography.bodySmall)
                 } else {
                     Text("برای این آیه، تفسیر فارسی از فهرست منبع دریافت نشد؛ متن بالا فقط ترجمه است.", style = MaterialTheme.typography.bodySmall)
                 }
@@ -837,39 +836,19 @@ fun DatabaseUnavailableScreen(
     onRecoveryComplete: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }
-    var restoring by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val recoveryState by recoveryViewModel.state.collectAsState()
+    LaunchedEffect(recoveryState.completed) {
+        if (recoveryState.completed) {
+            recoveryViewModel.consumeCompletion()
+            onRecoveryComplete()
+        }
+    }
     val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val suppliedPassword = recoveryViewModel.takePassword()
         if (uri == null) {
-            suppliedPassword?.fill('\u0000')
-            error = "انتخاب فایل بازیابی لغو شد؛ اطلاعات فعلی تغییری نکرد."
-            return@rememberLauncherForActivityResult
-        }
-        if (suppliedPassword == null) {
-            error = "گذرواژه بازیابی در دسترس نیست؛ دوباره تلاش کنید."
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            restoring = true
-            val result = runCatching {
-                val bytes = withContext(Dispatchers.IO) { readEncryptedBackup(context, uri) }
-                try {
-                    onRestoreBackup(bytes, suppliedPassword)
-                } finally {
-                    bytes.fill(0)
-                }
-            }
-            suppliedPassword.fill('\u0000')
-            restoring = false
-            result.onSuccess {
-                error = null
-                onRecoveryComplete()
-            }.onFailure {
-                error = it.message?.take(180) ?: "بازیابی انجام نشد؛ پایگاه داده قبلی دست‌نخورده باقی مانده است."
-            }
+            recoveryViewModel.cancelPending("انتخاب فایل بازیابی لغو شد؛ اطلاعات فعلی تغییری نکرد.")
+        } else {
+            recoveryViewModel.restoreFromUri(context.contentResolver, uri, onRestoreBackup)
         }
     }
     Column(
@@ -893,7 +872,7 @@ fun DatabaseUnavailableScreen(
             label = { Text("گذرواژه نسخه پشتیبان") },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            enabled = !restoring,
+            enabled = !recoveryState.restoring,
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -901,34 +880,16 @@ fun DatabaseUnavailableScreen(
             onClick = {
                 recoveryViewModel.holdPassword(password.toCharArray())
                 password = ""
-                error = null
                 backupPicker.launch(arrayOf("*/*"))
             },
-            enabled = password.isNotBlank() && !restoring,
+            enabled = password.isNotBlank() && !recoveryState.restoring,
             modifier = Modifier.fillMaxWidth()
         ) { Text("بازیابی از نسخه پشتیبان رمزگذاری‌شده") }
-        if (restoring) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (recoveryState.restoring) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             Text("اعتبارسنجی و بازیابی اتمیک اطلاعات…")
         }
-        error?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
-    }
-}
-
-private fun readEncryptedBackup(context: Context, uri: Uri): ByteArray {
-    val input = context.contentResolver.openInputStream(uri) ?: error("فایل پشتیبان قابل خواندن نیست")
-    return input.use { stream ->
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(8 * 1024)
-        var total = 0
-        while (true) {
-            val count = stream.read(buffer)
-            if (count < 0) break
-            total += count
-            require(total <= EncryptedBackupCodec.MAX_FILE_BYTES) { "فایل پشتیبان بیش از حد بزرگ است" }
-            output.write(buffer, 0, count)
-        }
-        output.toByteArray()
+        recoveryState.error?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
     }
 }
 

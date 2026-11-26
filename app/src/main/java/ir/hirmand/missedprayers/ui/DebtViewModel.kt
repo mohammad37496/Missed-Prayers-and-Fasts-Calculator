@@ -1,5 +1,7 @@
 package ir.hirmand.missedprayers.ui
 
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import android.os.SystemClock
@@ -20,7 +22,10 @@ import java.time.LocalDate
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 
 class DebtViewModel(private val repository: DebtRepository, private val quranRepository: QuranContentRepository, private val backupManager: EncryptedBackupManager) : ViewModel() {
     private val recordingGuard = RecordingGuard()
@@ -28,6 +33,8 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
     private var pendingRestorePasswordForPicker: CharArray? = null
     private val _dailyVerse = MutableStateFlow(DailyVerseResult(null, false, null))
     val dailyVerse = _dailyVerse.asStateFlow()
+    private val _backupStatus = MutableStateFlow<String?>(null)
+    val backupStatus = _backupStatus.asStateFlow()
     private val profileLoaded = MutableStateFlow(false)
     private val prayersLoaded = MutableStateFlow(false)
     private val fastingLoaded = MutableStateFlow(false)
@@ -63,6 +70,53 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
     }
 
     fun takeRestorePasswordForPicker(): CharArray? = pendingRestorePasswordForPicker.also { pendingRestorePasswordForPicker = null }
+
+    fun setBackupStatus(message: String?) {
+        _backupStatus.value = message
+    }
+
+    /** SAF I/O belongs to the ViewModel scope so Activity recreation cannot cancel a one-shot restore. */
+    fun saveBackupToUri(contentResolver: ContentResolver, uri: Uri, bytes: ByteArray) = viewModelScope.launch(Dispatchers.IO) {
+        val status = try {
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("فایل خروجی باز نشد")
+            "نسخه پشتیبان رمزگذاری‌شده ذخیره شد."
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            "ذخیره فایل انجام نشد: ${error.message ?: "خطای ناشناخته"}"
+        } finally {
+            bytes.fill(0)
+        }
+        _backupStatus.value = status
+    }
+
+    fun restoreBackupFromUri(contentResolver: ContentResolver, uri: Uri, password: CharArray) = viewModelScope.launch(Dispatchers.IO) {
+        var bytes: ByteArray? = null
+        try {
+            bytes = contentResolver.openInputStream(uri)?.use { stream ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(8 * 1024)
+                var total = 0
+                while (true) {
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= ir.hirmand.missedprayers.data.EncryptedBackupCodec.MAX_FILE_BYTES) { "فایل پشتیبان بیش از حد بزرگ است" }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            } ?: error("فایل انتخاب‌شده باز نشد")
+            backupManager.restoreBackup(bytes, password)
+            _backupStatus.value = "بازیابی کامل شد؛ همه داده‌ها در یک تراکنش جایگزین شدند."
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _backupStatus.value = "بازیابی انجام نشد: ${error.message ?: "خطای ناشناخته"}"
+        } finally {
+            bytes?.fill(0)
+            password.fill('\u0000')
+        }
+    }
 
     suspend fun refreshDailyVerse(date: LocalDate) {
         val previous = _dailyVerse.value

@@ -1,5 +1,6 @@
 package ir.hirmand.missedprayers.data
 
+import ir.hirmand.missedprayers.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
@@ -83,22 +84,25 @@ class QuranContentRepository(
     private val dao: DebtDao,
     private val arabicTextProvider: ArabicQuranTextProvider,
     private val recitationProvider: QuranRecitationProvider = UnconfiguredQuranRecitationProvider,
-    private val contentProvider: QuranEncContentProvider = HttpQuranEncContentProvider()
+    private val contentProvider: QuranEncContentProvider = HttpQuranEncContentProvider(),
+    private val allowUnverifiedMedia: Boolean = BuildConfig.DEBUG
 ) {
     suspend fun loadFor(date: LocalDate = LocalDate.now(), forceRefresh: Boolean = false): DailyVerseResult = withContext(Dispatchers.IO) {
         val key = date.toString()
         // Enforce the retention window on cache hits as well as successful network refreshes.
         // Keeping date.minusDays(6) and later yields exactly seven calendar dates including today.
         dao.pruneDailyVerses(date.minusDays(DAILY_VERSE_CACHE_DAYS - 1).toString())
-        if (!forceRefresh) dao.getDailyVerse(key)?.let { return@withContext DailyVerseResult(it, true, null) }
+        if (!forceRefresh) dao.getDailyVerse(key)?.let {
+            return@withContext DailyVerseResult(it.withMediaPolicy(), true, null)
+        }
         try {
             val fetched = fetchVerse(date)
             val cached = dao.getDailyVerse(key)
             val verse = fetched.copy(
-                tafsirText = fetched.tafsirText ?: cached?.tafsirText,
-                tafsirSource = fetched.tafsirSource ?: cached?.tafsirSource,
-                recitationUrl = fetched.recitationUrl ?: cached?.recitationUrl,
-                reciterName = fetched.reciterName ?: cached?.reciterName
+                tafsirText = if (allowUnverifiedMedia) fetched.tafsirText ?: cached?.tafsirText else null,
+                tafsirSource = if (allowUnverifiedMedia) fetched.tafsirSource ?: cached?.tafsirSource else null,
+                recitationUrl = if (allowUnverifiedMedia) fetched.recitationUrl ?: cached?.recitationUrl else null,
+                reciterName = if (allowUnverifiedMedia) fetched.reciterName ?: cached?.reciterName else null
             )
             dao.saveDailyVerse(verse)
             DailyVerseResult(verse, false, null)
@@ -106,13 +110,17 @@ class QuranContentRepository(
             if (error is CancellationException) throw error
             val cached = dao.getLatestDailyVerse()
             DailyVerseResult(
-                cached,
+                cached?.withMediaPolicy(),
                 cached != null,
                 error.message ?: "دریافت محتوای روز ممکن نشد",
                 stale = cached != null && cached.dayKey != key
             )
         }
     }
+
+    private fun DailyVerseEntity.withMediaPolicy(): DailyVerseEntity = if (allowUnverifiedMedia) this else copy(
+        tafsirText = null, tafsirSource = null, recitationUrl = null, reciterName = null
+    )
 
     private suspend fun fetchVerse(date: LocalDate): DailyVerseEntity {
         val catalogue = contentProvider.listTranslations()
@@ -143,14 +151,20 @@ class QuranContentRepository(
         val arabic = arabicTextProvider.getAyah(surahNumber, ayahNumber)
         val translation = selected.optString("translation")
         val footnotesValue = selected.opt("footnotes")
-        require(footnotesValue is String) { "پانوشت‌های اصلی مترجم از QuranEnc دریافت نشد" }
-        val translationFootnotes = footnotesValue.takeIf(String::isNotBlank)
+        val translationFootnotes = when (footnotesValue) {
+            null, JSONObject.NULL -> null
+            is String -> footnotesValue.takeIf(String::isNotBlank)
+            else -> error("ساختار پانوشت‌های مترجم از QuranEnc معتبر نیست")
+        }
         require(!arabic.isNullOrBlank() && translation.isNotBlank()) { "متن آیه از Tanzil یا ترجمه فارسی از QuranEnc ناقص است" }
         require(arabic.length <= 5_000 && translation.length <= 5_000 && (translationFootnotes == null || translationFootnotes.length <= 16_000)) {
             "متن آیه یا پانوشت‌های مترجم از حد مجاز طول بیشتر است"
         }
 
-        val tafsirMeta = optionalContent { findTafsir(contentProvider.listTafsirs()) }
+        // The published QuranEnc reuse terms describe translations but do not
+        // separately grant republication rights for this Persian tafsir edition.
+        // Keep unverified media behind a debug-only gate until source-specific terms are confirmed.
+        val tafsirMeta = if (allowUnverifiedMedia) optionalContent { findTafsir(contentProvider.listTafsirs()) } else null
         val tafsir = tafsirMeta?.let { meta ->
             optionalContent {
                 val tafsirKey = meta.getString("key")
@@ -161,7 +175,7 @@ class QuranContentRepository(
                 }?.optString("text")?.takeIf(String::isNotBlank)
             }
         }
-        val audio = optionalContent { recitationProvider.resolve(globalNumber) }
+        val audio = if (allowUnverifiedMedia) optionalContent { recitationProvider.resolve(globalNumber) } else null
 
         return DailyVerseEntity(
             dayKey = date.toString(), surah = surahNumber, ayah = ayahNumber, globalNumber = globalNumber,
