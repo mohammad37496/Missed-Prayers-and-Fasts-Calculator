@@ -69,12 +69,15 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 
-// Room 2.8.5's migration schema serializer uses kotlinx-serialization 1.8.1.
-// Lifecycle 2.10.0 contributes a 1.7.3 strict constraint to AndroidTest; that
-// older runtime lacks GeneratedSerializer.typeParametersSerializers(), causing
-// MigrationTestHelper to fail with AbstractMethodError on device.
+// Room 2.8.5's migration schema serializer requires the 1.8.1 serialization ABI.
+// AndroidTest also receives a strict 1.7.3 constraint from Lifecycle; forcing
+// only the multiplatform metadata module leaves core-jvm at 1.7.3 on Android.
+// Align both modules so the device runtime has the same GeneratedSerializer ABI.
 configurations.matching { it.name.contains("AndroidTest") }.configureEach {
-    resolutionStrategy.force("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
+    resolutionStrategy.force(
+        "org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1",
+        "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.8.1"
+    )
 }
 
 ksp {

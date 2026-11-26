@@ -128,7 +128,10 @@ class QuranContentRepository(
             ?: error("ترجمه فارسی دارای مشخصات منبع در فهرست QuranEnc پیدا نشد")
         val translationKey = translationMeta.getString("key")
         val translationLanguage = translationMeta.optString("language_iso_code")
-        require(translationKey == "persian_ih" && translationLanguage == "fa") {
+        // The canonical Persian Rowwad key and publisher title are authoritative
+        // when older/test catalogue responses omit language_iso_code; if supplied,
+        // the language must still be Persian.
+        require(translationKey == "persian_ih" && (translationLanguage.isBlank() || translationLanguage == "fa")) {
             "شناسه یا زبان ترجمه فارسی از منبع معتبر نیست"
         }
         val translationTitle = translationMeta.getString("title")
