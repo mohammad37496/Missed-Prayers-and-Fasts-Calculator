@@ -23,6 +23,7 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
     val prayers = repository.prayers.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val fasting = repository.fasting.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val recentRecords = repository.recentRecords.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val allRecords = repository.allRecords.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val profile = repository.profile.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val excusePeriods = repository.excusePeriods.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val plannerSettings = repository.plannerSettings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

@@ -57,6 +57,7 @@ import ir.hirmand.missedprayers.domain.DebtEstimateEngine
 import ir.hirmand.missedprayers.domain.FiqhEvaluationContext
 import ir.hirmand.missedprayers.domain.RecordedPeriod
 import ir.hirmand.missedprayers.domain.PlanProjection
+import ir.hirmand.missedprayers.domain.estimatedActiveDays
 import ir.hirmand.missedprayers.domain.PrayerType
 import java.time.LocalDate
 import java.time.ZoneId
@@ -189,7 +190,7 @@ fun PlannerScreen(settings: PlannerSettingsEntity?, prayers: List<Pair<String, I
     var reminders by remember(settings) { mutableStateOf(settings?.reminderEnabled ?: false) }
     var hour by remember(settings) { mutableStateOf((settings?.reminderHour ?: 20).toString()) }
     var minute by remember(settings) { mutableStateOf((settings?.reminderMinute ?: 0).toString()) }
-    val remaining = prayers.sumOf { it.second }
+    val remaining = prayers.sumOf { it.second.toLong() }
     val projection = runCatching { PlanProjection(remaining, prayerTarget.toInt(), mask) }.getOrNull()
     LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("برنامه‌ریز جبران", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
@@ -208,7 +209,7 @@ fun PlannerScreen(settings: PlannerSettingsEntity?, prayers: List<Pair<String, I
             }
         }
         item { if (projection != null) Text("با $remaining نماز باقی‌مانده، حدود ${projection.estimatedActiveDays()} روز فعال و پایان تقریبی ${CalendarDates.display(projection.estimatedCompletionDate(CalendarDates.today(timezoneId ?: ZoneId.systemDefault().id)))} لازم است.") }
-        item { Text("روزه باقی‌مانده: $fastingRemaining روز؛ با هدف ${fastingTarget.toIntOrNull() ?: 0} در روز فعال، زمان تقریبی ${(fastingRemaining + (fastingTarget.toIntOrNull() ?: 1).coerceAtLeast(1) - 1) / (fastingTarget.toIntOrNull() ?: 1).coerceAtLeast(1)} روز فعال است.") }
+        item { Text("روزه باقی‌مانده: $fastingRemaining روز؛ با هدف ${fastingTarget.toIntOrNull() ?: 0} در روز فعال، زمان تقریبی ${estimatedActiveDays(fastingRemaining.toLong(), (fastingTarget.toIntOrNull() ?: 1).coerceAtLeast(1))} روز فعال است.") }
         item { Text("یادآورها با WorkManager زمان‌بندی می‌شوند و ممکن است به‌دلیل حالت ذخیره باتری یا محدودیت سیستم‌عامل با تأخیر اجرا شوند.", style = MaterialTheme.typography.bodySmall) }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -299,14 +300,14 @@ fun CalendarScreen(profile: UserProfileEntity?) {
 @Composable
 fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>) {
     var search by remember { mutableStateOf("") }
-    val prayerCompleted = prayers.sumOf { it.completed }
-    val prayerTotal = prayers.sumOf { it.total }
+    val prayerCompleted = prayers.sumOf { it.completed.toLong() }
+    val prayerTotal = prayers.sumOf { it.total.toLong() }
     val fastingCompleted = fasting?.completed ?: 0
     val fastingTotal = fasting?.total ?: 0
     LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("گزارش پیشرفت", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
         item { Text("نماز: $prayerCompleted از $prayerTotal انجام‌شده · ${ (prayerTotal - prayerCompleted).coerceAtLeast(0) } باقی‌مانده") }
-        item { androidx.compose.material3.LinearProgressIndicator(progress = { if (prayerTotal == 0) 0f else prayerCompleted.toFloat() / prayerTotal }, modifier = Modifier.fillMaxWidth()) }
+        item { androidx.compose.material3.LinearProgressIndicator(progress = { if (prayerTotal == 0L) 0f else (prayerCompleted.toDouble() / prayerTotal).toFloat() }, modifier = Modifier.fillMaxWidth()) }
         item { Text("روزه: $fastingCompleted از $fastingTotal انجام‌شده · ${(fastingTotal - fastingCompleted).coerceAtLeast(0)} باقی‌مانده") }
         item { androidx.compose.material3.LinearProgressIndicator(progress = { if (fastingTotal == 0) 0f else fastingCompleted.toFloat() / fastingTotal }, modifier = Modifier.fillMaxWidth()) }
         items(prayers, key = { it.prayerType }) { debt ->

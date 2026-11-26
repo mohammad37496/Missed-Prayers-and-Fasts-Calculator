@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -162,5 +163,68 @@ class EncryptedBackupIntegrationTest {
         assertEquals(30, database.debtDao().getFasting()?.total)
         assertEquals("MENSTRUATION", database.debtDao().getAllExcusePeriods().single().kind)
         assertEquals("2020-01-10", database.debtDao().getAllExcusePeriods().single().startDate)
+    }
+
+    @Test fun searchableHistoryIncludesRecordsOlderThanDashboardRecentWindow() = runBlocking {
+        val dao = database.debtDao()
+        repeat(25) { index ->
+            dao.insertRecord(
+                DebtRecordEntity(
+                    kind = "PRAYER",
+                    reference = "FAJR",
+                    amount = 1,
+                    createdAt = 1_000L + index,
+                    beforeCompleted = index,
+                    afterCompleted = index + 1
+                )
+            )
+        }
+
+        assertEquals(20, dao.observeRecentRecords().first().size)
+        val history = dao.observeAllRecords().first()
+        assertEquals(25, history.size)
+        assertEquals((25L downTo 1L).toList(), history.map { it.id })
+    }
+
+    @Test fun restoreRejectsHistoryWithoutMatchingDebtWithoutReplacingExistingData() = runBlocking {
+        val dao = database.debtDao()
+        dao.savePrayer(PrayerDebtEntity("ISHA", 9, 2, 1_000L))
+        dao.insertRecord(
+            DebtRecordEntity(
+                kind = "PRAYER",
+                reference = "FAJR",
+                amount = 1,
+                createdAt = 1_100L,
+                beforeCompleted = 0,
+                afterCompleted = 1
+            )
+        )
+        val manager = EncryptedBackupManager(database)
+        val backup = manager.createBackup("correct-backup-password".toCharArray())
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { manager.restoreBackup(backup, "correct-backup-password".toCharArray()) }
+        }
+        assertEquals(2, dao.getPrayer("ISHA")?.completed)
+        assertEquals(null, dao.getPrayer("FAJR"))
+    }
+
+    @Test fun undoCannotRestoreCompletedCountAboveCurrentDebtTotal() = runBlocking {
+        val dao = database.debtDao()
+        dao.savePrayer(PrayerDebtEntity("FAJR", 5, 5, 1_000L))
+        val id = dao.insertRecord(
+            DebtRecordEntity(
+                kind = "PRAYER_ADJUSTMENT",
+                reference = "FAJR",
+                amount = 5,
+                createdAt = 1_100L,
+                beforeCompleted = 10,
+                afterCompleted = 5
+            )
+        )
+
+        val repository = DebtRepository(database)
+        assertThrows(IllegalStateException::class.java) { runBlocking { repository.undoRecord(id) } }
+        assertEquals(5, dao.getPrayer("FAJR")?.completed)
     }
 }

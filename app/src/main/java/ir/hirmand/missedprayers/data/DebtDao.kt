@@ -47,8 +47,11 @@ interface DebtDao {
     @Insert
     suspend fun insertRecord(record: DebtRecordEntity): Long
 
-    @Query("SELECT * FROM debt_records ORDER BY createdAt DESC LIMIT 20")
+    @Query("SELECT * FROM debt_records ORDER BY createdAt DESC, id DESC LIMIT 20")
     fun observeRecentRecords(): Flow<List<DebtRecordEntity>>
+
+    @Query("SELECT * FROM debt_records ORDER BY createdAt DESC, id DESC")
+    fun observeAllRecords(): Flow<List<DebtRecordEntity>>
 
     @Query("SELECT * FROM debt_records WHERE id = :id")
     suspend fun getRecord(id: Long): DebtRecordEntity?

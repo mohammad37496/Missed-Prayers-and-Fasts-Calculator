@@ -163,7 +163,7 @@ fun HomeScreen(viewModel: DebtViewModel) {
                                 ir.hirmand.missedprayers.notifications.ReminderScheduler.schedule(context, settings, profile?.timezoneId ?: ZoneId.systemDefault().id)
                             }
                         }
-                        "reports" -> ReportsScreen(prayers, fasting, recentRecords)
+                        "reports" -> ReportsScreen(prayers, fasting, viewModel.allRecords.collectAsState().value)
                         "more" -> MoreScreen(onProfile = { selectedTab = "profile" }, onFiqh = { selectedTab = "settings" }, onBackup = { selectedTab = "backup" })
                         "profile" -> ProfileScreen(profile, periods, { value -> viewModel.saveProfile(value) { error = it } },
                             { kind, start, end, note -> viewModel.addExcusePeriod(kind, start, end, note) { error = it } }, viewModel::deleteExcusePeriod,
@@ -262,7 +262,7 @@ private fun Dashboard(
     onRefreshVerse: () -> Unit,
     onUndoRecord: (Long) -> Unit, onEdit: () -> Unit
 ) {
-    val prayerRemaining = prayers.sumOf { (it.total - it.completed).coerceAtLeast(0) }
+    val prayerRemaining = prayers.sumOf { (it.total - it.completed).coerceAtLeast(0).toLong() }
     val fastRemaining = ((fasting?.total ?: 0) - (fasting?.completed ?: 0)).coerceAtLeast(0)
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {

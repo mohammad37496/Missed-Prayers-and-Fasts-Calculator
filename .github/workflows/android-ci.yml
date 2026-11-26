@@ -33,6 +33,16 @@ jobs:
       - name: Run unit tests and assemble APK
         run: ./gradlew --no-daemon testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug lintDebug
 
+      - name: Run instrumentation tests on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: ./gradlew --no-daemon connectedDebugAndroidTest
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:

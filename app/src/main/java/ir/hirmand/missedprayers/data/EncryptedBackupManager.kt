@@ -49,13 +49,17 @@ class EncryptedBackupManager(private val database: AppDatabase) {
         val records = root.getJSONArray("records").toEntities { item ->
             val kind = item.getString("kind"); val reference = item.getString("reference"); val amount = item.getInt("amount")
             require(amount > 0 && ((kind in setOf("PRAYER", "PRAYER_ADJUSTMENT") && reference in setOf("FAJR", "DHUHR", "ASR", "MAGHRIB", "ISHA")) || (kind in setOf("FASTING", "FASTING_ADJUSTMENT") && reference == "FASTING")))
+            val id = item.getLong("id")
+            require(id > 0) { "شناسه رکورد تاریخچه معتبر نیست" }
             val before = if (backupVersion >= 5) item.getInt("beforeCompleted") else 0
             val after = if (backupVersion >= 5) item.getInt("afterCompleted") else 0
             require(before >= 0 && after >= 0)
+            val debtTotal = if (reference == "FASTING") fasting?.total else prayers.firstOrNull { it.prayerType == reference }?.total
+            require(debtTotal != null) { "رکورد تاریخچه به شمارنده بدهی موجودی اشاره نمی‌کند" }
             if (backupVersion >= 5) {
                 require(if (kind.endsWith("ADJUSTMENT")) kotlin.math.abs(after.toLong() - before.toLong()) == amount.toLong() else after.toLong() - before.toLong() == amount.toLong())
             }
-            DebtRecordEntity(item.getLong("id"), kind, reference, amount, item.getLong("createdAt"), before, after)
+            DebtRecordEntity(id, kind, reference, amount, item.getLong("createdAt"), before, after)
         }
         require(records.size <= 100_000 && records.map { it.id }.distinct().size == records.size)
         val profile = root.optJSONObject("profile")?.let {

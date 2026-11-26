@@ -3,11 +3,16 @@ package ir.hirmand.missedprayers.domain
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
-data class PlanProjection(val remaining: Int, val dailyTarget: Int, val activeWeekdaysMask: Int) {
+fun estimatedActiveDays(remaining: Long, dailyTarget: Int): Long {
+    require(remaining >= 0 && dailyTarget > 0)
+    return if (remaining == 0L) 0L else (remaining + dailyTarget - 1L) / dailyTarget
+}
+
+data class PlanProjection(val remaining: Long, val dailyTarget: Int, val activeWeekdaysMask: Int) {
     init { require(remaining >= 0 && dailyTarget > 0 && activeWeekdaysMask in 1..127 && activeWeekdaysMask != 0) }
 
     fun estimatedCompletionDate(from: LocalDate): LocalDate {
-        if (remaining == 0) return from
+        if (remaining == 0L) return from
         val activePerWeek = Integer.bitCount(activeWeekdaysMask)
         var first = from
         while (activeWeekdaysMask and (1 shl (first.dayOfWeek.value - 1)) == 0) first = first.plusDays(1)
@@ -22,7 +27,7 @@ data class PlanProjection(val remaining: Int, val dailyTarget: Int, val activeWe
         return candidate
     }
 
-    fun estimatedActiveDays(): Long = if (remaining == 0) 0 else (remaining.toLong() + dailyTarget - 1) / dailyTarget
+    fun estimatedActiveDays(): Long = estimatedActiveDays(remaining, dailyTarget)
 }
 
 data class EstimateInputs(

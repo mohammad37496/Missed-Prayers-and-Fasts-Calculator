@@ -45,8 +45,15 @@ class DebtEstimateEngineTest {
     }
 
     @Test fun plannerUsesArithmeticForVeryLargeRemainingCounts() {
-        val projection = PlanProjection(remaining = Int.MAX_VALUE, dailyTarget = 100, activeWeekdaysMask = 127)
+        val projection = PlanProjection(remaining = Int.MAX_VALUE.toLong(), dailyTarget = 100, activeWeekdaysMask = 127)
         assertEquals(21_474_837L, projection.estimatedActiveDays())
         assertEquals(LocalDate.of(60823, 1, 3), projection.estimatedCompletionDate(LocalDate.parse("2026-11-26")))
+    }
+
+    @Test fun plannerAndFastingTargetsDoNotOverflowLongRemainingCounts() {
+        val combinedPrayerDebt = Int.MAX_VALUE.toLong() * 5L
+        val projection = PlanProjection(remaining = combinedPrayerDebt, dailyTarget = 100, activeWeekdaysMask = 127)
+        assertEquals(107_374_183L, projection.estimatedActiveDays())
+        assertEquals(71_582_789L, estimatedActiveDays(Int.MAX_VALUE.toLong(), 30))
     }
 }

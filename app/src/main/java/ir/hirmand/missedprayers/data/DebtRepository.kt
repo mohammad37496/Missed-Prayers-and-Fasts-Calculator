@@ -10,6 +10,7 @@ class DebtRepository(private val database: AppDatabase) {
     val prayers: Flow<List<PrayerDebtEntity>> = dao.observePrayers()
     val fasting: Flow<FastingDebtEntity?> = dao.observeFasting()
     val recentRecords: Flow<List<DebtRecordEntity>> = dao.observeRecentRecords()
+    val allRecords: Flow<List<DebtRecordEntity>> = dao.observeAllRecords()
     val profile: Flow<UserProfileEntity?> = dao.observeProfile()
     val excusePeriods: Flow<List<ExcusePeriodEntity>> = dao.observeExcusePeriods()
     val plannerSettings: Flow<PlannerSettingsEntity?> = dao.observePlannerSettings()
@@ -132,13 +133,21 @@ class DebtRepository(private val database: AppDatabase) {
             val now = System.currentTimeMillis()
             when (record.kind) {
                 PRAYER_KIND, PRAYER_ADJUSTMENT_KIND -> {
-                    val current = dao.getPrayer(record.reference)?.completed ?: error("رکورد نماز دیگر وجود ندارد")
+                    val debt = dao.getPrayer(record.reference) ?: error("رکورد نماز دیگر وجود ندارد")
+                    val current = debt.completed
                     check(current == record.afterCompleted) { "این ثبت پس از فعالیت‌های بعدی ایجاد شده؛ برای جلوگیری از تغییر نادرست، بازگردانی مستقیم ممکن نیست." }
+                    check(record.beforeCompleted in 0..debt.total && record.afterCompleted in 0..debt.total) {
+                        "مقدار پیشین این ثبت از سقف فعلی بدهی بیشتر است؛ بازگردانی مستقیم ممکن نیست."
+                    }
                     dao.setPrayerCompleted(record.reference, record.beforeCompleted, now)
                 }
                 FASTING_KIND, FASTING_ADJUSTMENT_KIND -> {
-                    val current = dao.getFasting()?.completed ?: error("رکورد روزه دیگر وجود ندارد")
+                    val debt = dao.getFasting() ?: error("رکورد روزه دیگر وجود ندارد")
+                    val current = debt.completed
                     check(current == record.afterCompleted) { "این ثبت پس از فعالیت‌های بعدی ایجاد شده؛ برای جلوگیری از تغییر نادرست، بازگردانی مستقیم ممکن نیست." }
+                    check(record.beforeCompleted in 0..debt.total && record.afterCompleted in 0..debt.total) {
+                        "مقدار پیشین این ثبت از سقف فعلی بدهی بیشتر است؛ بازگردانی مستقیم ممکن نیست."
+                    }
                     dao.setFastingCompleted(record.beforeCompleted, now)
                 }
                 else -> error("نوع رکورد برای بازگردانی شناخته‌شده نیست")
