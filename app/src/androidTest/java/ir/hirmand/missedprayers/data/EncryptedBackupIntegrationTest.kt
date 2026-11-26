@@ -310,4 +310,20 @@ class EncryptedBackupIntegrationTest {
             keyStore.deleteEntry(alias)
         }
     }
+
+    @Test fun missingKeyEnvelopeDoesNotGenerateKeyWhenDatabaseAlreadyExists() {
+        val alias = "missed_worship_existing_database_test"
+        val preferences = context.getSharedPreferences("database_key_existing_test", Context.MODE_PRIVATE)
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
+        preferences.edit().clear().commit()
+        try {
+            val provider = DatabaseKeyProvider(context, "database_key_existing_test", alias, requireExistingDatabaseKey = true)
+            assertThrows(IllegalStateException::class.java) { provider.getOrCreatePassphrase() }
+            assertFalse(keyStore.containsAlias(alias))
+            assertFalse(preferences.contains("encrypted_passphrase"))
+        } finally {
+            preferences.edit().clear().commit()
+            keyStore.deleteEntry(alias)
+        }
+    }
 }

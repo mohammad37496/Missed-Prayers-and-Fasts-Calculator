@@ -7,20 +7,31 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import java.io.File
 
 @Database(entities = [PrayerDebtEntity::class, FastingDebtEntity::class, DebtRecordEntity::class, UserProfileEntity::class, ExcusePeriodEntity::class, PlannerSettingsEntity::class, FiqhPreferencesEntity::class, DailyVerseEntity::class], version = 5, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun debtDao(): DebtDao
 
     companion object {
+        private const val DATABASE_NAME = "missed_worship.db"
         @Volatile private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
+            val databaseFile = context.getDatabasePath(DATABASE_NAME)
+            val existingDatabase = databaseFile.exists() || File(databaseFile.path + "-wal").exists() || File(databaseFile.path + "-shm").exists()
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
-                "missed_worship.db"
-            ).openHelperFactory(SupportOpenHelperFactory(DatabaseKeyProvider(context).getOrCreatePassphrase()))
+                DATABASE_NAME
+            ).openHelperFactory(
+                SupportOpenHelperFactory(
+                    DatabaseKeyProvider(
+                        context,
+                        requireExistingDatabaseKey = existingDatabase
+                    ).getOrCreatePassphrase()
+                )
+            )
                 .addMigrations(*MIGRATIONS)
                 .build().also { instance = it }
         }

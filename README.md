@@ -52,6 +52,7 @@
 - Kotlin 2.2.10، Android Gradle Plugin 9.5.0، Gradle 9.6، KSP
 - Jetpack Compose، Material 3، MVVM، Coroutines/Flow
 - Room 2.8.5، SQLCipher Android 4.20.0، Android Keystore، AES-GCM
+- اگر فایل دیتابیس یا WAL/SHM آن موجود باشد ولی envelope یا کلید Keystore مفقود شده باشد، کلید جایگزین ساخته نمی‌شود تا دیتابیس رمزگذاری‌شده با کلید اشتباه باز نشود.
 - Android ICU برای تبدیل تقویم‌ها بدون بسته‌بندی دیتای حجیم ICU4J؛ WorkManager برای یادآورهای زمان‌بندی‌شده
 - مرزبندی `domain` / `data` / `ui` / `notifications` در ماژول app؛ ساختار فعلی تک‌ماژولی است اما مرزهای قابل استخراج به Gradle modules حفظ شده‌اند
 

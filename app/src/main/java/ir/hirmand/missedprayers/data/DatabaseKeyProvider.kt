@@ -14,14 +14,15 @@ import javax.crypto.spec.GCMParameterSpec
 internal class DatabaseKeyProvider(
     context: Context,
     private val preferencesName: String = "database_key_v1",
-    private val keyAlias: String = KEY_ALIAS
+    private val keyAlias: String = KEY_ALIAS,
+    private val requireExistingDatabaseKey: Boolean = false
 ) {
     private val preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
 
     @Suppress("UseKtx")
     fun getOrCreatePassphrase(): ByteArray {
         val saved = preferences.getString(ENCRYPTED_KEY, null)
-        val key = getOrCreateKeystoreKey(requireExisting = saved != null)
+        val key = getOrCreateKeystoreKey(requireExisting = saved != null || requireExistingDatabaseKey)
         if (saved != null) {
             val packed = Base64.decode(saved, Base64.NO_WRAP)
             require(packed.size > GCM_IV_LENGTH) { "کلید رمزنگاری ذخیره‌شده معتبر نیست" }
