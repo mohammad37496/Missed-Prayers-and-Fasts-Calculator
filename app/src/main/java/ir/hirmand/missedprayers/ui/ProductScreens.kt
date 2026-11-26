@@ -107,11 +107,8 @@ private fun calendarLabel(preference: String): String = when (preference) {
     else -> "میلادی"
 }
 
-private fun parseCalendarInput(value: String, preference: String): LocalDate {
-    val parts = value.trim().split(Regex("[-/]"))
-    require(parts.size == 3)
-    return CalendarDates.fromPreferred(CalendarDate(parts[0].toInt(), parts[1].toInt(), parts[2].toInt()), preference)
-}
+private fun parseCalendarInput(value: String, preference: String): LocalDate =
+    CalendarDates.parsePreferredInput(value, preference)
 
 private fun formatCalendarInput(date: LocalDate, preference: String): String {
     val value = CalendarDates.toPreferred(date, preference)

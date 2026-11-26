@@ -39,6 +39,20 @@ object CalendarDates {
         else -> throw IllegalArgumentException("تقویم پیش‌فرض پشتیبانی نمی‌شود")
     }
 
+    /** Accepts Latin, Persian and Arabic-Indic digits in the date fields used by the Persian UI. */
+    fun parsePreferredInput(value: String, preference: String): LocalDate {
+        val normalized = buildString(value.length) {
+            value.trim().forEach { character ->
+                val digit = character.digitToIntOrNull()
+                append(if (digit == null) character else ('0'.code + digit).toChar())
+            }
+        }
+        val parts = normalized.split(Regex("[-/]"))
+        require(parts.size == 3) { "تاریخ باید با قالب سال-ماه-روز وارد شود" }
+        val date = CalendarDate(parts[0].toInt(), parts[1].toInt(), parts[2].toInt())
+        return fromPreferred(date, preference)
+    }
+
     fun today(zoneId: String = ZoneId.systemDefault().id): LocalDate = Instant.now().atZone(ZoneId.of(zoneId)).toLocalDate()
 
     fun display(date: LocalDate, locale: Locale = Locale.forLanguageTag("fa-IR")): String {
