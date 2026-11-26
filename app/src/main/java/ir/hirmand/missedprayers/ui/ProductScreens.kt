@@ -63,6 +63,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -163,7 +164,7 @@ fun ProfileScreen(
     val rawPrayerEstimate = estimatePreview?.prayerUnitsByType?.get(PrayerType.FAJR) ?: 0
     val rawFastingEstimate = estimatePreview?.fastingDays ?: 0
 
-    LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(18.dp).testTag("planner-screen-list"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("پروفایل و برآورد شخصی", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Text("اطلاعات زیر برای سازمان‌دهی برآورد شماست؛ به‌تنهایی حکم شرعی یا بدهی قطعی ایجاد نمی‌کند.", style = MaterialTheme.typography.bodyMedium)

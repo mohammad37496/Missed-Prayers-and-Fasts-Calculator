@@ -4,11 +4,14 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.LayoutDirection
 import ir.hirmand.missedprayers.data.DebtRecordEntity
 import ir.hirmand.missedprayers.domain.CalendarDates
@@ -79,7 +82,8 @@ class RtlLayoutTest {
             .forEach { composeRule.onNodeWithText(it).performClick() }
 
         composeRule.onNodeWithText("حداقل یک روز فعال در هفته انتخاب کنید.").assertExists()
-        composeRule.onNodeWithText("ذخیره برنامه و یادآورها").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithTag("planner-screen-list").performScrollToIndex(13)
+        composeRule.onNodeWithText("ذخیره برنامه و یادآورها").assertIsNotEnabled()
     }
 
     @Test fun profileChoiceButtonsExposeSelectedStateToAccessibility() {
@@ -97,12 +101,13 @@ class RtlLayoutTest {
         }
 
         composeRule.onNodeWithText("✓ مشخص نشده").assertIsSelected()
+        composeRule.onNodeWithText("آقا").assertIsNotSelected()
+        composeRule.onNodeWithText("✓ شمسی").performScrollTo().assertIsSelected()
+        composeRule.onNodeWithText("میلادی").assertIsNotSelected()
+        composeRule.onNodeWithText("✓ عادت ماهانه").performScrollTo().assertIsSelected()
+        composeRule.onNodeWithText("نفاس").assertIsNotSelected()
         composeRule.onNodeWithText("میلادی").performScrollTo().performClick()
         composeRule.onNodeWithText("✓ میلادی").assertIsSelected()
-        composeRule.onNodeWithText("آقا").performScrollTo().performClick()
-        composeRule.onNodeWithText("✓ آقا").assertIsSelected()
-        composeRule.onNodeWithText("نفاس").performScrollTo().performClick()
-        composeRule.onNodeWithText("✓ نفاس").assertIsSelected()
     }
 
     @Test fun weeklyActivityChartExposesUnambiguousFullDatesToAccessibility() {
