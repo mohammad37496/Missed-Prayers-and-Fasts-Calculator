@@ -278,6 +278,37 @@ class EncryptedBackupRestoreValidationTest {
         }
     }
 
+    @Test fun backupRestoreKeepsHistoricalCountersThatWereLaterCorrectedAndReduced() = runBlocking {
+        val dao = database.debtDao()
+        dao.savePrayer(PrayerDebtEntity("FAJR", total = 40, completed = 20, updatedAt = 3_000L))
+        val payload = JSONObject()
+            .put("schemaVersion", 6)
+            .put("createdAt", 3_000L)
+            .put("prayers", JSONArray().put(JSONObject().put("type", "FAJR").put("total", 40).put("completed", 20).put("updatedAt", 3_000L)))
+            .put("fasting", JSONObject.NULL)
+            .put("records", JSONArray()
+                .put(JSONObject().put("id", 1L).put("kind", "PRAYER").put("reference", "FAJR").put("amount", 50).put("createdAt", 1_000L).put("beforeCompleted", 0).put("afterCompleted", 50))
+                .put(JSONObject().put("id", 2L).put("kind", "PRAYER_ADJUSTMENT").put("reference", "FAJR").put("amount", 30).put("createdAt", 2_000L).put("beforeCompleted", 50).put("afterCompleted", 20)))
+            .put("profile", JSONObject.NULL)
+            .put("periods", JSONArray())
+            .put("planner", JSONObject.NULL)
+            .put("fiqh", JSONObject.NULL)
+            .put("dailyVerses", JSONArray())
+        val password = "historical-counter-backup".toCharArray()
+        try {
+            val encrypted = EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+            EncryptedBackupManager(database).restoreBackup(encrypted, password.copyOf())
+            val restored = dao.getAllRecords()
+            assertEquals(2, restored.size)
+            assertEquals(50, restored.first { it.kind == "PRAYER" }.afterCompleted)
+            assertEquals(20, restored.first { it.kind == "PRAYER_ADJUSTMENT" }.afterCompleted)
+            assertEquals(40, dao.getPrayer("FAJR")?.total)
+            assertEquals(20, dao.getPrayer("FAJR")?.completed)
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
     @Test fun databaseFailureDuringRestoreRollsBackEveryClearedTable() = runBlocking {
         val dao = database.debtDao()
         dao.savePrayer(PrayerDebtEntity("FAJR", 30, 8, 1_000L))

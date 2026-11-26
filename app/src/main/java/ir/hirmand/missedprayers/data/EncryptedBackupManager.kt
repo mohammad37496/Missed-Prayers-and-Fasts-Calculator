@@ -66,19 +66,31 @@ class EncryptedBackupManager(
             require(before >= 0 && after >= 0)
             val debtTotal = if (reference == "FASTING") fasting?.total else prayers.firstOrNull { it.prayerType == reference }?.total
             require(debtTotal != null) { "رکورد تاریخچه به شمارنده بدهی موجودی اشاره نمی‌کند" }
-            if (kind.endsWith("_TOTAL_ADJUSTMENT")) {
-                require(before >= 0 && after >= 0) { "مقادیر اصلاح سقف بدهی معتبر نیستند" }
-            } else {
-                require(before in 0..debtTotal && after in 0..debtTotal) {
-                    "مقادیر پیش و پس از ثبت تاریخچه از سقف بدهی بیشتر هستند"
-                }
-            }
             if (backupVersion >= 5) {
                 require(if (kind.endsWith("ADJUSTMENT")) kotlin.math.abs(after.toLong() - before.toLong()) == amount.toLong() else after.toLong() - before.toLong() == amount.toLong())
             }
             DebtRecordEntity(id, kind, reference, amount, item.getLong("createdAt"), before, after)
         }
         require(records.size <= 100_000 && records.map { it.id }.distinct().size == records.size)
+        // A valid historical completion may exceed today's total when a later
+        // adjustment corrected that completion or explicitly reduced the debt ceiling.
+        // Use recorded adjustment values as the historical upper bound while still
+        // rejecting out-of-range counters when no such correction exists.
+        val currentDebtTotals = buildMap {
+            prayers.forEach { put(it.prayerType, it.total) }
+            fasting?.let { put("FASTING", it.total) }
+        }
+        val historicalAdjustmentCeilings = records.filter { it.kind.endsWith("ADJUSTMENT") }
+            .groupBy { it.reference }
+            .mapValues { (_, history) -> history.maxOf { maxOf(it.beforeCompleted, it.afterCompleted) } }
+        records.forEach { record ->
+            val currentTotal = currentDebtTotals[record.reference]
+                ?: error("رکورد تاریخچه به شمارنده بدهی موجودی اشاره نمی‌کند")
+            val historicalCeiling = maxOf(currentTotal, historicalAdjustmentCeilings[record.reference] ?: 0)
+            require(record.beforeCompleted in 0..historicalCeiling && record.afterCompleted in 0..historicalCeiling) {
+                "مقادیر پیش و پس از ثبت تاریخچه از سقف بدهی و اصلاحات ثبت‌شده بیشتر هستند"
+            }
+        }
         val profile = root.optionalObject("profile")?.let {
             val start = it.optNullableString("taklifStartDate")?.let(LocalDate::parse)
             val end = it.optNullableString("taklifEndDate")?.let(LocalDate::parse)
