@@ -164,7 +164,7 @@ fun ProfileScreen(
     val rawPrayerEstimate = estimatePreview?.prayerUnitsByType?.get(PrayerType.FAJR) ?: 0
     val rawFastingEstimate = estimatePreview?.fastingDays ?: 0
 
-    LazyColumn(Modifier.fillMaxSize().padding(18.dp).testTag("planner-screen-list"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("پروفایل و برآورد شخصی", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             Text("اطلاعات زیر برای سازمان‌دهی برآورد شماست؛ به‌تنهایی حکم شرعی یا بدهی قطعی ایجاد نمی‌کند.", style = MaterialTheme.typography.bodyMedium)
@@ -322,7 +322,7 @@ fun PlannerScreen(
         minuteValue !in 0..59 -> "دقیقه یادآور باید بین ۰ تا ۵۹ باشد."
         else -> null
     }
-    LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(18.dp).testTag("planner-screen-list"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("برنامه‌ریز جبران", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
         item { Text("هدف‌ها را خودتان تعیین می‌کنید. برآورد زمان پایان، برنامه‌ای تقریبی است و روزهای انتخابی هفته را لحاظ می‌کند.") }
         item { OutlinedTextField(prayerTarget, { prayerTarget = it.filter(Char::isDigit).take(3) }, label = { Text("هدف نماز در هر روز فعال") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
