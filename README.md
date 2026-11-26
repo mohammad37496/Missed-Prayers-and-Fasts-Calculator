@@ -19,6 +19,7 @@
 - پشتیبان‌گیری و بازیابی فایل با PBKDF2-HMAC-SHA256 و AES-256-GCM؛ اعتبارسنجی کامل قبل از جایگزینی و restore اتمیک داخل تراکنش Room
 - حذف کامل داده‌های محلی با تأیید صریح کاربر
 - راهنمای آفلاین برای ثبت بدهی، برنامه‌ریزی، تقویم، پشتیبان‌گیری و محدودیت‌های فقهی برنامه
+- فونت فارسی Vazirmatn v33.003 با وزن‌های Regular/Medium/SemiBold/Bold تحت SIL Open Font License؛ منبع رسمی https://github.com/rastikerdar/vazirmatn و فایل مجوز در `app/src/main/assets/fonts/OFL.txt` نگهداری می‌شود. متن عربی قرآن برای حفظ نشانه‌گذاری Uthmani از فونت Serif سیستم استفاده می‌کند.
 - Room schema version 5 با migrationهای افزایشی 1→2→3→4→5
 - SQLCipher Android 4.20.0 با کلید تصادفی دیتابیس محافظت‌شده توسط Android Keystore و AES-GCM؛ Android Auto Backup و Device Transfer غیرفعال‌اند
 - آیه روز واقعی: متن عربی بدون تغییر از Tanzil Uthmani v1.1، ترجمه فارسی Rowwad از QuranEnc و تفسیر فارسی As-Saadi از endpoint مستقل Tafsir؛ منبع و نسخه هر دو متن نمایش داده می‌شوند

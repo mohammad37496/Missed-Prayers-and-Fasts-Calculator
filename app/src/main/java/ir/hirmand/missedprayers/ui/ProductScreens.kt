@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
@@ -445,7 +446,7 @@ fun DailyVerseCard(result: DailyVerseResult, onRefresh: () -> Unit) {
                 Text("با اتصال دوباره، محتوا را بارگیری کنید.", style = MaterialTheme.typography.bodySmall)
             } else {
                 Text("سوره ${verse.surah} · آیه ${verse.ayah}", style = MaterialTheme.typography.labelMedium)
-                Text(verse.arabicText, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+                Text(verse.arabicText, style = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Serif), color = MaterialTheme.colorScheme.primary)
                 Text(verse.persianTranslation, style = MaterialTheme.typography.bodyLarge)
                 Text("ترجمه: ${verse.translationSource} · نسخه ${verse.translationVersion}", style = MaterialTheme.typography.labelSmall)
                 if (verse.tafsirText != null) {
