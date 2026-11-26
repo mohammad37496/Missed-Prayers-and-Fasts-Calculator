@@ -11,13 +11,17 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Protects the SQLCipher passphrase with a non-exportable Android Keystore key. */
-internal class DatabaseKeyProvider(context: Context) {
-    private val preferences = context.getSharedPreferences("database_key_v1", Context.MODE_PRIVATE)
+internal class DatabaseKeyProvider(
+    context: Context,
+    private val preferencesName: String = "database_key_v1",
+    private val keyAlias: String = KEY_ALIAS
+) {
+    private val preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
 
     @Suppress("UseKtx")
     fun getOrCreatePassphrase(): ByteArray {
-        val key = getOrCreateKeystoreKey()
         val saved = preferences.getString(ENCRYPTED_KEY, null)
+        val key = getOrCreateKeystoreKey(requireExisting = saved != null)
         if (saved != null) {
             val packed = Base64.decode(saved, Base64.NO_WRAP)
             require(packed.size > GCM_IV_LENGTH) { "کلید رمزنگاری ذخیره‌شده معتبر نیست" }
@@ -39,14 +43,17 @@ internal class DatabaseKeyProvider(context: Context) {
         return passphrase
     }
 
-    private fun getOrCreateKeystoreKey(): SecretKey {
+    private fun getOrCreateKeystoreKey(requireExisting: Boolean): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (keyStore.getKey(keyAlias, null) as? SecretKey)?.let { return it }
+        check(!requireExisting) {
+            "کلید محافظت از پایگاه داده در Android Keystore پیدا نشد؛ کلید جایگزین ساخته نشد تا داده رمزگذاری‌شده دست‌نخورده بماند. برای بازیابی، از نسخه پشتیبان رمزگذاری‌شده استفاده کنید."
+        }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
             KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
+                keyAlias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)

@@ -16,6 +16,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDate
+import java.security.KeyStore
 
 @RunWith(AndroidJUnit4::class)
 class EncryptedBackupIntegrationTest {
@@ -226,5 +227,24 @@ class EncryptedBackupIntegrationTest {
         val repository = DebtRepository(database)
         assertThrows(IllegalStateException::class.java) { runBlocking { repository.undoRecord(id) } }
         assertEquals(5, dao.getPrayer("FAJR")?.completed)
+    }
+
+    @Test fun missingKeystoreKeyIsNotSilentlyReplaced() {
+        val alias = "missed_worship_database_key_test"
+        val preferences = context.getSharedPreferences("database_key_test_v1", Context.MODE_PRIVATE)
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
+        preferences.edit().clear().commit()
+        try {
+            val provider = DatabaseKeyProvider(context, "database_key_test_v1", alias)
+            provider.getOrCreatePassphrase().fill(0)
+            keyStore.deleteEntry(alias)
+
+            assertThrows(IllegalStateException::class.java) { provider.getOrCreatePassphrase() }
+            assertFalse(keyStore.containsAlias(alias))
+            assertEquals(true, preferences.contains("encrypted_passphrase"))
+        } finally {
+            preferences.edit().clear().commit()
+            keyStore.deleteEntry(alias)
+        }
     }
 }
