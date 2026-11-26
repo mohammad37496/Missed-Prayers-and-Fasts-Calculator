@@ -21,6 +21,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,9 +39,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.media3.common.AudioAttributes as PlayerAudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -320,9 +318,11 @@ fun CalendarScreen(profile: UserProfileEntity?) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>) {
     var search by remember { mutableStateOf("") }
+    var recordFilter by remember { mutableStateOf("ALL") }
     val prayerCompleted = prayers.sumOf { it.completed.toLong() }
     val prayerTotal = prayers.sumOf { it.total.toLong() }
     val fastingCompleted = fasting?.completed ?: 0
@@ -342,7 +342,22 @@ fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, 
             } }
         }
         item { OutlinedTextField(search, { search = it }, label = { Text("جست‌وجو در تاریخچه") }, modifier = Modifier.fillMaxWidth()) }
-        items(records.filter { it.kind.contains(search, true) || it.reference.contains(search, true) || it.createdAt.toString().contains(search) }) { record ->
+        item {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("ALL" to "همه", "PRAYER" to "نماز", "FASTING" to "روزه", "ADJUSTMENT" to "اصلاح‌ها").forEach { (value, label) ->
+                    FilterChip(selected = recordFilter == value, onClick = { recordFilter = value }, label = { Text(label) })
+                }
+            }
+        }
+        items(records.filter { record ->
+            val matchesFilter = when (recordFilter) {
+                "PRAYER" -> record.reference != "FASTING"
+                "FASTING" -> record.reference == "FASTING"
+                "ADJUSTMENT" -> record.kind.endsWith("ADJUSTMENT")
+                else -> true
+            }
+            matchesFilter && (record.kind.contains(search, true) || record.reference.contains(search, true) || record.createdAt.toString().contains(search))
+        }, key = { it.id }) { record ->
             val category = if (record.reference == "FASTING") "روزه" else "نماز ${PrayerType.entries.firstOrNull { it.name == record.reference }?.title ?: record.reference}"
             val kindLabel = if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "ثبت انجام‌شده"
             val localDate = java.time.Instant.ofEpochMilli(record.createdAt).atZone(ZoneId.systemDefault()).toLocalDate()
