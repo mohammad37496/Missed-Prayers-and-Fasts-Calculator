@@ -1,20 +1,26 @@
 package ir.hirmand.missedprayers.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -34,6 +40,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -61,6 +71,7 @@ import ir.hirmand.missedprayers.domain.PlanProjection
 import ir.hirmand.missedprayers.domain.estimatedActiveDays
 import ir.hirmand.missedprayers.domain.PrayerType
 import java.time.LocalDate
+import java.time.Instant
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
@@ -334,6 +345,7 @@ fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, 
         item { androidx.compose.material3.LinearProgressIndicator(progress = { if (prayerTotal == 0L) 0f else (prayerCompleted.toDouble() / prayerTotal).toFloat() }, modifier = Modifier.fillMaxWidth()) }
         item { Text("روزه: $fastingCompleted از $fastingTotal انجام‌شده · ${(fastingTotal - fastingCompleted).coerceAtLeast(0)} باقی‌مانده") }
         item { androidx.compose.material3.LinearProgressIndicator(progress = { if (fastingTotal == 0) 0f else fastingCompleted.toFloat() / fastingTotal }, modifier = Modifier.fillMaxWidth()) }
+        item { WeeklyActivityChart(records) }
         items(prayers, key = { it.prayerType }) { debt ->
             val label = PrayerType.entries.firstOrNull { it.name == debt.prayerType }?.title ?: debt.prayerType
             Card { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -381,6 +393,72 @@ fun ReportsScreen(prayers: List<PrayerDebtEntity>, fasting: FastingDebtEntity?, 
                 Text(if (record.kind.endsWith("ADJUSTMENT")) "${record.beforeCompleted} ← ${record.afterCompleted}" else "+${record.amount} مورد")
                 Text(CalendarDates.display(localDate), style = MaterialTheme.typography.labelSmall)
             } }
+        }
+    }
+}
+
+@Composable
+private fun WeeklyActivityChart(records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>) {
+    val today = remember { LocalDate.now() }
+    val zone = remember { ZoneId.systemDefault() }
+    val dailyActivity = remember(records, today, zone) {
+        val byDate = records.asSequence()
+            .filter { it.kind == "PRAYER" || it.kind == "FASTING" }
+            .mapNotNull { record ->
+                runCatching { Instant.ofEpochMilli(record.createdAt).atZone(zone).toLocalDate() to record }.getOrNull()
+            }
+            .groupBy({ it.first }, { it.second })
+        (6 downTo 0).map { offset ->
+            val date = today.minusDays(offset.toLong())
+            val entries = byDate[date].orEmpty()
+            val prayer = entries.filter { it.kind == "PRAYER" }.sumOf { it.amount.toLong() }
+            val fasting = entries.filter { it.kind == "FASTING" }.sumOf { it.amount.toLong() }
+            Triple(date, prayer, fasting)
+        }
+    }
+    val maxValue = dailyActivity.maxOfOrNull { maxOf(it.second, it.third) }?.coerceAtLeast(1L) ?: 1L
+    val prayerColor = MaterialTheme.colorScheme.primary
+    val fastingColor = MaterialTheme.colorScheme.secondary
+    Card {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("روند ثبت انجام‌ها در هفت روز اخیر", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (dailyActivity.all { it.second == 0L && it.third == 0L }) {
+                Text("در هفت روز اخیر ثبت انجامی وجود ندارد.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Canvas(
+                    Modifier.fillMaxWidth().height(132.dp).semantics {
+                        contentDescription = dailyActivity.joinToString("؛ ") { (date, prayer, fasting) ->
+                            "${date.dayOfMonth}: نماز $prayer، روزه $fasting"
+                        }
+                    }
+                ) {
+                    val groupWidth = size.width / dailyActivity.size
+                    val barWidth = groupWidth * 0.26f
+                    val gap = groupWidth * 0.06f
+                    dailyActivity.forEachIndexed { index, entry ->
+                        val center = groupWidth * (index + 0.5f)
+                        val prayerHeight = (entry.second.toDouble() / maxValue * size.height).toFloat()
+                        val fastingHeight = (entry.third.toDouble() / maxValue * size.height).toFloat()
+                        drawRect(prayerColor, Offset(center - barWidth - gap / 2f, size.height - prayerHeight), Size(barWidth, prayerHeight))
+                        drawRect(fastingColor, Offset(center + gap / 2f, size.height - fastingHeight), Size(barWidth, fastingHeight))
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    dailyActivity.forEach { (date, _, _) ->
+                        Text(date.dayOfMonth.toString(), style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(9.dp).background(prayerColor, CircleShape))
+                        Text("نماز", style = MaterialTheme.typography.labelSmall)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(9.dp).background(fastingColor, CircleShape))
+                        Text("روزه", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
         }
     }
 }
