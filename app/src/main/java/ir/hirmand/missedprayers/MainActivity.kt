@@ -17,6 +17,7 @@ import ir.hirmand.missedprayers.data.EncryptedBackupManager
 import ir.hirmand.missedprayers.data.TanzilAssetTextProvider
 import ir.hirmand.missedprayers.ui.DebtViewModel
 import ir.hirmand.missedprayers.ui.HomeScreen
+import ir.hirmand.missedprayers.ui.DatabaseUnavailableScreen
 import ir.hirmand.missedprayers.ui.theme.MissedWorshipTheme
 
 class MainActivity : ComponentActivity() {
@@ -33,10 +34,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         System.loadLibrary("sqlcipher")
+        val databaseFailure = runCatching { AppDatabase.get(applicationContext) }.exceptionOrNull()
+        val keystoreKeyLost = databaseFailure?.message?.contains("Android Keystore") == true
         setContent {
             MissedWorshipTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    HomeScreen(viewModel)
+                    if (databaseFailure != null) DatabaseUnavailableScreen(keystoreKeyLost)
+                    else HomeScreen(viewModel)
                 }
             }
         }

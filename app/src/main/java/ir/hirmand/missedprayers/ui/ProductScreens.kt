@@ -649,6 +649,26 @@ fun HelpScreen() {
     }
 }
 
+@Composable
+fun DatabaseUnavailableScreen(keystoreKeyLost: Boolean) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)
+    ) {
+        Text(
+            "دسترسی به پایگاه داده امن ممکن نیست",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.error,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            if (keystoreKeyLost) "کلید محافظت از پایگاه داده در Android Keystore پیدا نشد. برای محافظت از اطلاعات، کلید جایگزین ساخته نشده است."
+            else "پایگاه داده رمزگذاری‌شده باز نشد. اطلاعات موجود برای جلوگیری از آسیب بیشتر تغییر داده نشده‌اند."
+        )
+        Text("برنامه را حذف نصب نکنید و داده‌های آن را پاک نکنید. اگر نسخه پشتیبان رمزگذاری‌شده دارید، فایل و گذرواژه آن را در جای امن نگه دارید؛ بازیابی این وضعیت به بررسی فنی نیاز دارد.")
+    }
+}
+
 private fun periodKindLabel(kind: String) = when (kind) {
     "MENSTRUATION" -> "عادت ماهانه"
     "POSTPARTUM" -> "نفاس"
