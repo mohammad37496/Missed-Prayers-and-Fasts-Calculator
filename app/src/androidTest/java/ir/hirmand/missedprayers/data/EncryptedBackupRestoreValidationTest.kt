@@ -763,7 +763,7 @@ class EncryptedBackupRestoreValidationTest {
             override fun translationForSurah(key: String, surah: Int) = JSONArray().put(
                 JSONObject()
                     .put("id", "1")
-                    .put("sura", "1")
+                    .put("sura", surah.toString())
                     .put("aya", "1")
                     .put("translation", "ترجمه فارسی عین منبع")
                     .put("footnotes", footnotes)

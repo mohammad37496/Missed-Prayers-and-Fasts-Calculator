@@ -6,8 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.Canvas
@@ -16,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.LazyColumn
@@ -118,7 +118,6 @@ private fun formatCalendarInput(date: LocalDate, preference: String): String {
 private fun reformatCalendarInput(value: String, from: String, to: String): String =
     if (value.isBlank()) "" else formatCalendarInput(parseCalendarInput(value, from), to)
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
     profile: UserProfileEntity?, periods: List<ExcusePeriodEntity>,
@@ -172,7 +171,7 @@ fun ProfileScreen(
         item { OutlinedTextField(name, { name = it.take(60) }, label = { Text("نام نمایشی (اختیاری)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { Text("جنسیت (اختیاری)", fontWeight = FontWeight.SemiBold) }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("UNSPECIFIED" to "مشخص نشده", "WOMAN" to "خانم", "MAN" to "آقا", "PREFER_NOT_TO_SAY" to "ترجیح می‌دهم نگویم").forEach { (value, label) ->
                     OutlinedButton(onClick = { gender = value }) { Text(if (gender == value) "✓ $label" else label) }
                 }
@@ -183,7 +182,7 @@ fun ProfileScreen(
         item { OutlinedTextField(timezoneId, { timezoneId = it.take(80) }, label = { Text("منطقه زمانی IANA (مثلاً Asia/Tehran)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { Text("تقویم پیش‌فرض") }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("PERSIAN" to "شمسی", "ISLAMIC_CIVIL" to "قمری محاسباتی", "GREGORIAN" to "میلادی").forEach { (value, label) ->
                     OutlinedButton(onClick = {
                         runCatching {
@@ -253,7 +252,7 @@ fun ProfileScreen(
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("ثبت روزهای عذر یا بازه‌های شخصی", fontWeight = FontWeight.Bold)
                     Text("این بازه‌ها فقط ثبت می‌شوند و تا زمان انتخاب قاعده فقهی مستند، به‌طور خودکار از محاسبه کم نخواهند شد.", style = MaterialTheme.typography.bodySmall)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("MENSTRUATION" to "عادت ماهانه", "POSTPARTUM" to "نفاس", "ILLNESS" to "بیماری", "OTHER_USER_RECORDED" to "سایر").forEach { (value, label) ->
                             OutlinedButton(onClick = { periodKind = value }) { Text(if (periodKind == value) "✓ $label" else label) }
                         }
@@ -472,7 +471,6 @@ fun CalendarScreen(profile: UserProfileEntity?) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ReportsScreen(
     prayers: List<PrayerDebtEntity>,
@@ -532,7 +530,7 @@ fun ReportsScreen(
         }
         item { OutlinedTextField(search, { search = it }, label = { Text("جست‌وجو در تاریخچه") }, modifier = Modifier.fillMaxWidth()) }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("ALL" to "همه", "PRAYER" to "نماز", "FASTING" to "روزه", "ADJUSTMENT" to "اصلاح‌ها").forEach { (value, label) ->
                     FilterChip(selected = recordFilter == value, onClick = { recordFilter = value }, label = { Text(label) })
                 }

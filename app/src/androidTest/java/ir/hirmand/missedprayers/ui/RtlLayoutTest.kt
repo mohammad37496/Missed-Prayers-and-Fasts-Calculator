@@ -78,7 +78,7 @@ class RtlLayoutTest {
             .forEach { composeRule.onNodeWithText(it).performClick() }
 
         composeRule.onNodeWithText("حداقل یک روز فعال در هفته انتخاب کنید.").assertExists()
-        composeRule.onNodeWithText("ذخیره برنامه و یادآورها").assertIsNotEnabled()
+        composeRule.onNodeWithText("ذخیره برنامه و یادآورها").performScrollTo().assertIsNotEnabled()
     }
 
     @Test fun weeklyActivityChartExposesUnambiguousFullDatesToAccessibility() {
@@ -104,7 +104,11 @@ class RtlLayoutTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription(today.toString()).assertExists()
+        val expectedDescription = (6 downTo 0).joinToString("؛ ") { offset ->
+            val date = today.minusDays(offset.toLong())
+            "${date}: نماز ${if (date == today) 1 else 0}، روزه 0"
+        }
+        composeRule.onNodeWithContentDescription(expectedDescription).assertExists()
     }
 
     @Test fun moreDestinationsRemainReachableThroughVerticalScrolling() {
