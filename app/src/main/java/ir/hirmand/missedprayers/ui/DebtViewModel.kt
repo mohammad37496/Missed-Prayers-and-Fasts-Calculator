@@ -31,8 +31,17 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
     init { refreshDailyVerse() }
 
     fun refreshDailyVerse() = viewModelScope.launch {
-        _dailyVerse.value = _dailyVerse.value.copy(loading = true, message = null)
-        _dailyVerse.value = quranRepository.loadFor(forceRefresh = true)
+        val previous = _dailyVerse.value
+        _dailyVerse.value = previous.copy(loading = true, message = null)
+
+        // Load the local copy first so opening the app remains useful without a network.
+        // If a cached verse exists, refresh it in the background and keep it visible
+        // until the fresh response succeeds (or the repository returns the cache).
+        val cachedOrFresh = quranRepository.loadFor(forceRefresh = false)
+        _dailyVerse.value = cachedOrFresh.copy(loading = cachedOrFresh.fromCache)
+        if (cachedOrFresh.fromCache) {
+            _dailyVerse.value = quranRepository.loadFor(forceRefresh = true)
+        }
     }
 
     fun savePrayer(type: PrayerType, total: Int, completed: Int, onError: (String) -> Unit) = viewModelScope.launch {

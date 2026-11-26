@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -184,7 +185,7 @@ fun ProfileScreen(
 fun PlannerScreen(settings: PlannerSettingsEntity?, prayers: List<Pair<String, Int>>, fastingRemaining: Int, timezoneId: String?, onSave: (PlannerSettingsEntity) -> Unit) {
     var prayerTarget by remember(settings) { mutableStateOf((settings?.dailyPrayerTarget ?: 5).toString()) }
     var fastingTarget by remember(settings) { mutableStateOf((settings?.dailyFastingTarget ?: 1).toString()) }
-    var mask by remember(settings) { mutableStateOf(settings?.activeWeekdaysMask ?: 127) }
+    var mask by remember(settings) { mutableIntStateOf(settings?.activeWeekdaysMask ?: 127) }
     var reminders by remember(settings) { mutableStateOf(settings?.reminderEnabled ?: false) }
     var hour by remember(settings) { mutableStateOf((settings?.reminderHour ?: 20).toString()) }
     var minute by remember(settings) { mutableStateOf((settings?.reminderMinute ?: 0).toString()) }

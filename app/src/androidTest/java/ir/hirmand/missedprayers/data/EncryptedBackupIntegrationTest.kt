@@ -14,6 +14,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.LocalDate
 
 @RunWith(AndroidJUnit4::class)
 class EncryptedBackupIntegrationTest {
@@ -106,5 +107,27 @@ class EncryptedBackupIntegrationTest {
             passphrase.fill(0)
             context.deleteDatabase(name)
         }
+    }
+
+    @Test fun dailyVerseCanBeReadFromEncryptedCacheWithoutNetwork() = runBlocking {
+        val date = LocalDate.parse("2026-11-26")
+        val cached = DailyVerseEntity(
+            dayKey = date.toString(), surah = 1, ayah = 1, globalNumber = 1,
+            arabicText = "بِسْمِ ٱللَّهِ", persianTranslation = "به نام خدا",
+            translationSource = "QuranEnc", translationVersion = "test",
+            tafsirText = null, tafsirSource = null, recitationUrl = null,
+            reciterName = null, fetchedAt = 1_000L
+        )
+        database.debtDao().saveDailyVerse(cached)
+
+        val repository = QuranContentRepository(
+            database.debtDao(),
+            TanzilAssetTextProvider(context.assets)
+        )
+        val result = repository.loadFor(date, forceRefresh = false)
+
+        assertEquals(true, result.fromCache)
+        assertEquals(cached, result.verse)
+        assertEquals(null, result.message)
     }
 }
