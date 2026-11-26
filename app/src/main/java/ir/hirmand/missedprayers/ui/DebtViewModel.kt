@@ -24,6 +24,8 @@ import kotlinx.coroutines.launch
 
 class DebtViewModel(private val repository: DebtRepository, private val quranRepository: QuranContentRepository, private val backupManager: EncryptedBackupManager) : ViewModel() {
     private val recordingGuard = RecordingGuard()
+    private var pendingBackupForPicker: ByteArray? = null
+    private var pendingRestorePasswordForPicker: CharArray? = null
     private val _dailyVerse = MutableStateFlow(DailyVerseResult(null, false, null))
     val dailyVerse = _dailyVerse.asStateFlow()
     private val profileLoaded = MutableStateFlow(false)
@@ -46,6 +48,21 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
     val excusePeriods = repository.excusePeriods.onEach { excusePeriodsLoaded.value = true }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val plannerSettings = repository.plannerSettings.onEach { plannerSettingsLoaded.value = true }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val fiqhPreferences = repository.fiqhPreferences.onEach { fiqhPreferencesLoaded.value = true }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Keeps picker hand-off data across Activity recreation without placing secrets in saved state. */
+    fun holdBackupForPicker(bytes: ByteArray) {
+        pendingBackupForPicker?.fill(0)
+        pendingBackupForPicker = bytes
+    }
+
+    fun takeBackupForPicker(): ByteArray? = pendingBackupForPicker.also { pendingBackupForPicker = null }
+
+    fun holdRestorePasswordForPicker(password: CharArray) {
+        pendingRestorePasswordForPicker?.fill('\u0000')
+        pendingRestorePasswordForPicker = password
+    }
+
+    fun takeRestorePasswordForPicker(): CharArray? = pendingRestorePasswordForPicker.also { pendingRestorePasswordForPicker = null }
 
     suspend fun refreshDailyVerse(date: LocalDate) {
         val previous = _dailyVerse.value
@@ -154,5 +171,13 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
 
     fun deleteAllData(onResult: (Result<Unit>) -> Unit) = viewModelScope.launch {
         onResult(runCatching { repository.deleteAllData() })
+    }
+
+    override fun onCleared() {
+        pendingBackupForPicker?.fill(0)
+        pendingBackupForPicker = null
+        pendingRestorePasswordForPicker?.fill('\u0000')
+        pendingRestorePasswordForPicker = null
+        super.onCleared()
     }
 }

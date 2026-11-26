@@ -63,6 +63,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ir.hirmand.missedprayers.data.FastingDebtEntity
 import ir.hirmand.missedprayers.data.PrayerDebtEntity
@@ -103,20 +106,23 @@ fun HomeScreen(viewModel: DebtViewModel) {
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         notificationPermissionGranted = granted
     }
-    var pendingBackup by remember { mutableStateOf<ByteArray?>(null) }
-    var pendingImportPassword by remember { mutableStateOf<CharArray?>(null) }
     var backupStatus by remember { mutableStateOf<String?>(null) }
     val createBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.hirmand.mwbk")) { uri ->
-        val bytes = pendingBackup
-        pendingBackup = null
+        val bytes = viewModel.takeBackupForPicker()
         if (uri != null && bytes != null) scope.launch(Dispatchers.IO) {
-            val saved = runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("فایل خروجی باز نشد") }
+            val saved = try {
+                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("فایل خروجی باز نشد") }
+            } finally {
+                bytes.fill(0)
+            }
             withContext(Dispatchers.Main) { backupStatus = if (saved.isSuccess) "نسخه پشتیبان رمزگذاری‌شده ذخیره شد." else "ذخیره فایل انجام نشد: ${saved.exceptionOrNull()?.message}" }
-        } else backupStatus = "ذخیره نسخه پشتیبان لغو شد."
+        } else {
+            bytes?.fill(0)
+            backupStatus = if (uri == null) "ذخیره نسخه پشتیبان لغو شد." else "اطلاعات موقت نسخه پشتیبان پس از بازسازی برنامه در دسترس نیست؛ دوباره فایل را بسازید."
+        }
     }
     val importBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val password = pendingImportPassword
-        pendingImportPassword = null
+        val password = viewModel.takeRestorePasswordForPicker()
         if (uri != null && password != null) scope.launch(Dispatchers.IO) {
             val read = runCatching {
                 val input = context.contentResolver.openInputStream(uri) ?: error("فایل انتخاب‌شده باز نشد")
@@ -136,12 +142,15 @@ fun HomeScreen(viewModel: DebtViewModel) {
             }
             withContext(Dispatchers.Main) {
                 read.onSuccess { bytes ->
-                    viewModel.restoreBackup(bytes, password) { result -> backupStatus = if (result.isSuccess) "بازیابی کامل شد؛ همه داده‌ها در یک تراکنش جایگزین شدند." else "بازیابی انجام نشد: ${result.exceptionOrNull()?.message}" }
+                    viewModel.restoreBackup(bytes, password) { result ->
+                        bytes.fill(0)
+                        backupStatus = if (result.isSuccess) "بازیابی کامل شد؛ همه داده‌ها در یک تراکنش جایگزین شدند." else "بازیابی انجام نشد: ${result.exceptionOrNull()?.message}"
+                    }
                 }.onFailure { password.fill('\u0000'); backupStatus = "خواندن فایل ناموفق بود: ${it.message}" }
             }
         } else {
             password?.fill('\u0000')
-            backupStatus = "انتخاب فایل بازیابی لغو شد."
+            backupStatus = if (uri == null) "انتخاب فایل بازیابی لغو شد." else "گذرواژه موقت پس از بازسازی برنامه در دسترس نیست؛ بازیابی را دوباره آغاز کنید."
         }
     }
     val prayers by viewModel.prayers.collectAsState()
@@ -205,7 +214,7 @@ fun HomeScreen(viewModel: DebtViewModel) {
                         Column(Modifier.weight(1f).fillMaxHeight()) {
                             error?.let { message ->
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(message, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                Text(message, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                                     OutlinedButton(onClick = { error = null }) { Text("بستن") }
                                 }
                             }
@@ -224,7 +233,14 @@ fun HomeScreen(viewModel: DebtViewModel) {
                                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                         }
-                        "reports" -> ReportsScreen(prayers, fasting, allRecords, profile?.calendarPreference ?: "PERSIAN", profile?.timezoneId)
+                        "reports" -> ReportsScreen(
+                            prayers,
+                            fasting,
+                            allRecords,
+                            profile?.calendarPreference ?: "PERSIAN",
+                            profile?.timezoneId,
+                            onUndoRecord = { id -> viewModel.undoRecord(id) { error = it } }
+                        )
                         "more" -> MoreScreen(onProfile = { selectedTab = "profile" }, onFiqh = { selectedTab = "settings" }, onBackup = { selectedTab = "backup" }, onHelp = { selectedTab = "help" })
                         "help" -> HelpScreen()
                         "profile" -> ProfileScreen(profile, periods, { value -> viewModel.saveProfile(value) { error = it } },
@@ -245,10 +261,10 @@ fun HomeScreen(viewModel: DebtViewModel) {
                         }
                         "backup" -> BackupScreen(backupStatus,
                             onCreate = { password -> viewModel.createBackup(password.toCharArray()) { result ->
-                                result.onSuccess { bytes -> pendingBackup = bytes; createBackupLauncher.launch("missed-worship-backup.mwbk") }
+                                result.onSuccess { bytes -> viewModel.holdBackupForPicker(bytes); createBackupLauncher.launch("missed-worship-backup.mwbk") }
                                     .onFailure { backupStatus = "ساخت نسخه پشتیبان ناموفق بود: ${it.message}" }
                             } },
-                            onRestore = { password -> pendingImportPassword = password.toCharArray(); importBackupLauncher.launch(arrayOf("application/vnd.hirmand.mwbk", "application/octet-stream", "*/*")) })
+                            onRestore = { password -> viewModel.holdRestorePasswordForPicker(password.toCharArray()); importBackupLauncher.launch(arrayOf("application/vnd.hirmand.mwbk", "application/octet-stream", "*/*")) })
                         else -> Dashboard(prayers, fasting, onRecordPrayer = { type, amount -> viewModel.recordPrayer(type, amount) { error = it } },
                             recentRecords = recentRecords,
                             dailyVerse = dailyVerse,

@@ -53,6 +53,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -443,7 +445,8 @@ fun ReportsScreen(
     fasting: FastingDebtEntity?,
     records: List<ir.hirmand.missedprayers.data.DebtRecordEntity>,
     calendarPreference: String = "PERSIAN",
-    timezoneId: String? = null
+    timezoneId: String? = null,
+    onUndoRecord: (Long) -> Unit
 ) {
     var search by remember { mutableStateOf("") }
     var recordFilter by remember { mutableStateOf("ALL") }
@@ -507,11 +510,16 @@ fun ReportsScreen(
             val category = if (record.reference == "FASTING") "روزه" else "نماز ${PrayerType.entries.firstOrNull { it.name == record.reference }?.title ?: record.reference}"
             val kindLabel = if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "ثبت انجام‌شده"
             val localDate = Instant.ofEpochMilli(record.createdAt).atZone(zone).toLocalDate()
-            Card { Column(Modifier.padding(10.dp)) {
-                Text("$category · $kindLabel", fontWeight = FontWeight.SemiBold)
-                Text(if (record.kind.endsWith("ADJUSTMENT")) "${record.beforeCompleted} ← ${record.afterCompleted}" else "+${record.amount} مورد")
-                Text(CalendarDates.displayPreferred(localDate, calendarPreference), style = MaterialTheme.typography.labelSmall)
-            } }
+            Card {
+                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("$category · $kindLabel", fontWeight = FontWeight.SemiBold)
+                        Text(if (record.kind.endsWith("ADJUSTMENT")) "${record.beforeCompleted} ← ${record.afterCompleted}" else "+${record.amount} مورد")
+                        Text(CalendarDates.displayPreferred(localDate, calendarPreference), style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(onClick = { onUndoRecord(record.id) }) { Text("بازگردانی") }
+                }
+            }
         }
     }
 }
@@ -712,17 +720,35 @@ fun BackupScreen(status: String?, onCreate: (String) -> Unit, onRestore: (String
     LazyColumn(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("پشتیبان‌گیری امن", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
         item { Text("فایل پشتیبان با AES-256-GCM و کلید مشتق‌شده از گذرواژه رمزگذاری می‌شود. گذرواژه در برنامه ذخیره نمی‌شود؛ آن را در جای امن نگه دارید.") }
-        item { OutlinedTextField(password, { password = it.take(128) }, label = { Text("گذرواژه قوی (حداقل ۱۲ نویسه)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { Text("اگر می‌خواهید گذرواژه پشتیبان را تغییر دهید، یک فایل پشتیبان تازه با گذرواژه جدید بسازید. گذرواژه فراموش‌شده قابل بازیابی نیست و فایل قدیمی همچنان به گذرواژه قبلی نیاز دارد.", style = MaterialTheme.typography.bodySmall) }
+        item {
+            OutlinedTextField(
+                password,
+                { password = it.take(128) },
+                label = { Text("گذرواژه قوی (حداقل ۱۲ نویسه)") },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        }
         item { Button(onClick = { val value = password; password = ""; onCreate(value) }, enabled = password.length >= 12, modifier = Modifier.fillMaxWidth()) { Text("ساخت فایل پشتیبان رمزگذاری‌شده") } }
         item { Text("بازیابی، اطلاعات فعلی برنامه را با اطلاعات فایل جایگزین می‌کند. ابتدا یک نسخه پشتیبان از اطلاعات فعلی بگیرید.", color = MaterialTheme.colorScheme.error) }
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = confirmReplace, onCheckedChange = { confirmReplace = it })
+            Row(
+                Modifier.fillMaxWidth().toggleable(
+                    value = confirmReplace,
+                    role = Role.Checkbox,
+                    onValueChange = { confirmReplace = it }
+                ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(checked = confirmReplace, onCheckedChange = null)
                 Text("جایگزینی کامل داده‌های فعلی را می‌پذیرم")
             }
         }
         item { OutlinedButton(onClick = { val value = password; password = ""; onRestore(value) }, enabled = password.length >= 12 && confirmReplace, modifier = Modifier.fillMaxWidth()) { Text("انتخاب فایل و بازیابی") } }
-        if (status != null) item { Text(status, color = MaterialTheme.colorScheme.secondary) }
+        if (status != null) item { Text(status, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.secondary) }
         item { Text("فایل‌های ناسازگار، ناقص، دست‌کاری‌شده یا دارای گذرواژه اشتباه پیش از شروع تراکنش رد می‌شوند. بازیابی فقط پس از اعتبارسنجی کامل و در یک تراکنش دیتابیس انجام می‌شود.", style = MaterialTheme.typography.bodySmall) }
     }
 }
@@ -806,20 +832,20 @@ fun DatabaseLoadingScreen() {
 @Composable
 fun DatabaseUnavailableScreen(
     keyMaterialMissing: Boolean,
+    recoveryViewModel: BackupRecoveryViewModel,
     onRestoreBackup: suspend (ByteArray, CharArray) -> Unit,
     onRecoveryComplete: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var password by remember { mutableStateOf("") }
-    var pendingPassword by remember { mutableStateOf<CharArray?>(null) }
     var restoring by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val suppliedPassword = pendingPassword
+        val suppliedPassword = recoveryViewModel.takePassword()
         if (uri == null) {
             suppliedPassword?.fill('\u0000')
-            pendingPassword = null
+            error = "انتخاب فایل بازیابی لغو شد؛ اطلاعات فعلی تغییری نکرد."
             return@rememberLauncherForActivityResult
         }
         if (suppliedPassword == null) {
@@ -837,7 +863,6 @@ fun DatabaseUnavailableScreen(
                 }
             }
             suppliedPassword.fill('\u0000')
-            pendingPassword = null
             restoring = false
             result.onSuccess {
                 error = null
@@ -846,9 +871,6 @@ fun DatabaseUnavailableScreen(
                 error = it.message?.take(180) ?: "بازیابی انجام نشد؛ پایگاه داده قبلی دست‌نخورده باقی مانده است."
             }
         }
-    }
-    DisposableEffect(Unit) {
-        onDispose { pendingPassword?.fill('\u0000') }
     }
     Column(
         Modifier.fillMaxSize().padding(24.dp),
@@ -871,25 +893,25 @@ fun DatabaseUnavailableScreen(
             label = { Text("گذرواژه نسخه پشتیبان") },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            enabled = !restoring && pendingPassword == null,
+            enabled = !restoring,
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
         Button(
             onClick = {
-                pendingPassword = password.toCharArray()
+                recoveryViewModel.holdPassword(password.toCharArray())
                 password = ""
                 error = null
                 backupPicker.launch(arrayOf("*/*"))
             },
-            enabled = password.isNotBlank() && !restoring && pendingPassword == null,
+            enabled = password.isNotBlank() && !restoring,
             modifier = Modifier.fillMaxWidth()
         ) { Text("بازیابی از نسخه پشتیبان رمزگذاری‌شده") }
         if (restoring) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             Text("اعتبارسنجی و بازیابی اتمیک اطلاعات…")
         }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, color = MaterialTheme.colorScheme.error) }
     }
 }
 

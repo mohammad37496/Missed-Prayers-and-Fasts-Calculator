@@ -12,6 +12,7 @@ import java.time.LocalDate
 import java.io.ByteArrayOutputStream
 
 private const val MAX_QURANENC_RESPONSE_BYTES = 2 * 1024 * 1024
+private const val DAILY_VERSE_CACHE_DAYS = 7L
 
 data class DailyVerseResult(
     val verse: DailyVerseEntity?,
@@ -86,6 +87,9 @@ class QuranContentRepository(
 ) {
     suspend fun loadFor(date: LocalDate = LocalDate.now(), forceRefresh: Boolean = false): DailyVerseResult = withContext(Dispatchers.IO) {
         val key = date.toString()
+        // Enforce the retention window on cache hits as well as successful network refreshes.
+        // Keeping date.minusDays(6) and later yields exactly seven calendar dates including today.
+        dao.pruneDailyVerses(date.minusDays(DAILY_VERSE_CACHE_DAYS - 1).toString())
         if (!forceRefresh) dao.getDailyVerse(key)?.let { return@withContext DailyVerseResult(it, true, null) }
         try {
             val fetched = fetchVerse(date)
@@ -97,7 +101,6 @@ class QuranContentRepository(
                 reciterName = fetched.reciterName ?: cached?.reciterName
             )
             dao.saveDailyVerse(verse)
-            dao.pruneDailyVerses(date.minusDays(7).toString())
             DailyVerseResult(verse, false, null)
         } catch (error: Exception) {
             if (error is CancellationException) throw error
@@ -113,15 +116,17 @@ class QuranContentRepository(
 
     private suspend fun fetchVerse(date: LocalDate): DailyVerseEntity {
         val catalogue = contentProvider.listTranslations()
-        val translationMeta = findTranslation(catalogue, listOf("rowwad", "persian_ih"))
+        val translationMeta = findTranslation(catalogue)
             ?: error("ترجمه فارسی دارای مشخصات منبع در فهرست QuranEnc پیدا نشد")
         val translationKey = translationMeta.getString("key")
         val translationLanguage = translationMeta.optString("language_iso_code")
-        require(translationKey.matches(Regex("[a-z0-9_]{1,80}")) && (translationLanguage.isBlank() || translationLanguage == "fa")) {
+        require(translationKey == "persian_ih" && translationLanguage == "fa") {
             "شناسه یا زبان ترجمه فارسی از منبع معتبر نیست"
         }
-        val translationTitle = translationMeta.optString("title", "QuranEnc")
-        val translationVersion = translationMeta.optString("version", "نامشخص")
+        val translationTitle = translationMeta.getString("title")
+        val translationVersion = translationMeta.getString("version")
+        require(translationTitle.contains("rowwad", ignoreCase = true) || translationTitle.contains("رواد"))
+        require(translationVersion.isNotBlank()) { "نسخه ترجمه فارسی از منبع رسمی مشخص نشده است" }
 
         val surah = ((date.dayOfYear - 1) % 114) + 1
         val verses = contentProvider.translationForSurah(translationKey, surah)
@@ -130,9 +135,11 @@ class QuranContentRepository(
         val selected = verses.getJSONObject(index)
         val globalNumber = selected.optString("id").toIntOrNull()?.takeIf { it in 1..6236 }
             ?: error("شناسه سراسری آیه از منبع معتبر دریافت نشد")
-        val surahNumber = selected.optString("sura").toIntOrNull() ?: surah
-        val ayahNumber = selected.optString("aya").toIntOrNull() ?: (index + 1)
-        require(surahNumber in 1..114 && ayahNumber in 1..286) { "شماره سوره یا آیه از منبع معتبر نیست" }
+        val surahNumber = selected.optString("sura").toIntOrNull()
+            ?: error("شماره سوره از پاسخ رسمی QuranEnc دریافت نشد")
+        val ayahNumber = selected.optString("aya").toIntOrNull()
+            ?: error("شماره آیه از پاسخ رسمی QuranEnc دریافت نشد")
+        require(surahNumber == surah && ayahNumber in 1..286) { "شماره سوره یا آیه با درخواست QuranEnc مطابقت ندارد" }
         val arabic = arabicTextProvider.getAyah(surahNumber, ayahNumber)
         val translation = selected.optString("translation")
         val footnotesValue = selected.opt("footnotes")
@@ -172,11 +179,10 @@ class QuranContentRepository(
         uri.scheme == "https" && uri.userInfo == null && uri.port in listOf(-1, 443) && uri.host in setOf("download.quranicaudio.com", "audio.qurancdn.com")
     }.getOrDefault(false)
 
-    private fun findTranslation(items: JSONArray, terms: List<String>): JSONObject? =
+    private fun findTranslation(items: JSONArray): JSONObject? =
         (0 until items.length()).map { items.getJSONObject(it) }.firstOrNull { item ->
-            val key = item.optString("key").lowercase()
-            val title = item.optString("title").lowercase()
-            terms.any { key == it || title.contains(it) }
+            item.optString("key") == "persian_ih" &&
+                (item.optString("title").contains("rowwad", ignoreCase = true) || item.optString("title").contains("رواد"))
         }
 
     private fun findTafsir(items: JSONArray): JSONObject? =

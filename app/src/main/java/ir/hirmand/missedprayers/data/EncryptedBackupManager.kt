@@ -62,6 +62,9 @@ class EncryptedBackupManager(private val database: AppDatabase) {
             require(before >= 0 && after >= 0)
             val debtTotal = if (reference == "FASTING") fasting?.total else prayers.firstOrNull { it.prayerType == reference }?.total
             require(debtTotal != null) { "رکورد تاریخچه به شمارنده بدهی موجودی اشاره نمی‌کند" }
+            require(before in 0..debtTotal && after in 0..debtTotal) {
+                "مقادیر پیش و پس از ثبت تاریخچه از سقف بدهی بیشتر هستند"
+            }
             if (backupVersion >= 5) {
                 require(if (kind.endsWith("ADJUSTMENT")) kotlin.math.abs(after.toLong() - before.toLong()) == amount.toLong() else after.toLong() - before.toLong() == amount.toLong())
             }
@@ -83,7 +86,9 @@ class EncryptedBackupManager(private val database: AppDatabase) {
         val periods = root.getJSONArray("periods").toEntities { item ->
             val kind = item.getString("kind"); val start = LocalDate.parse(item.getString("startDate")); val end = LocalDate.parse(item.getString("endDate"))
             require(kind in setOf("MENSTRUATION", "POSTPARTUM", "ILLNESS", "OTHER_USER_RECORDED") && !end.isBefore(start))
-            ExcusePeriodEntity(item.getLong("id"), kind, start.toString(), end.toString(), item.optNullableString("note"), item.getLong("createdAt"))
+            val id = item.getLong("id")
+            require(id > 0) { "شناسه بازه عذر معتبر نیست" }
+            ExcusePeriodEntity(id, kind, start.toString(), end.toString(), item.optNullableString("note"), item.getLong("createdAt"))
         }
         require(periods.size <= 10_000 && periods.map { it.id }.distinct().size == periods.size)
         val planner = root.optionalObject("planner")?.let {

@@ -45,4 +45,26 @@ class AppDatabaseMigrationTest {
         migrated.close()
         InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)
     }
+
+    @Test fun migrationFromVersionFivePreservesCachedVerseAndAddsNullableFootnotes() {
+        val name = "migration-v5-to-v6-footnotes"
+        helper.createDatabase(name, 5).apply {
+            execSQL(
+                "INSERT INTO daily_verses (dayKey,surah,ayah,globalNumber,arabicText,persianTranslation,translationSource,translationVersion,tafsirText,tafsirSource,recitationUrl,reciterName,fetchedAt) " +
+                    "VALUES ('2026-11-26',1,1,1,'بِسْمِ اللَّهِ','ترجمه محفوظ','QuranEnc · Rowwad','1.1.3',NULL,NULL,NULL,NULL,123456789)"
+            )
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(name, 6, true, AppDatabase.MIGRATION_5_6)
+        migrated.query("SELECT arabicText,persianTranslation,translationVersion,translationFootnotes FROM daily_verses WHERE dayKey='2026-11-26'").use { cursor ->
+            check(cursor.moveToFirst())
+            assertEquals("بِسْمِ اللَّهِ", cursor.getString(0))
+            assertEquals("ترجمه محفوظ", cursor.getString(1))
+            assertEquals("1.1.3", cursor.getString(2))
+            check(cursor.isNull(3))
+        }
+        migrated.close()
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)
+    }
 }

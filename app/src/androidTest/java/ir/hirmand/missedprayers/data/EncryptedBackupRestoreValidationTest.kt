@@ -78,6 +78,35 @@ class EncryptedBackupRestoreValidationTest {
         }
     }
 
+    @Test fun historyCountersOutsideDebtRangeAreRejectedBeforeRestoreTransaction() = runBlocking {
+        val dao = database.debtDao()
+        dao.savePrayer(PrayerDebtEntity("FAJR", 30, 8, 2_000L))
+        val payload = JSONObject()
+            .put("schemaVersion", 5)
+            .put("createdAt", 3_000L)
+            .put("prayers", JSONArray().put(JSONObject().put("type", "FAJR").put("total", 20).put("completed", 7).put("updatedAt", 1_000L)))
+            .put("fasting", JSONObject.NULL)
+            .put("records", JSONArray().put(JSONObject().put("id", 1L).put("kind", "PRAYER").put("reference", "FAJR").put("amount", 1).put("createdAt", 1_000L).put("beforeCompleted", 20).put("afterCompleted", 21)))
+            .put("profile", JSONObject.NULL)
+            .put("periods", JSONArray())
+            .put("planner", JSONObject.NULL)
+            .put("fiqh", JSONObject.NULL)
+            .put("dailyVerses", JSONArray())
+        val password = "history-range-validation".toCharArray()
+        val encrypted = EncryptedBackupCodec.encrypt(payload.toString().toByteArray(Charsets.UTF_8), password)
+
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking { EncryptedBackupManager(database).restoreBackup(encrypted, password.copyOf()) }
+            }
+            assertEquals(30, dao.getPrayer("FAJR")?.total)
+            assertEquals(8, dao.getPrayer("FAJR")?.completed)
+            assertTrue(dao.getAllRecords().isEmpty())
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
     @Test fun databaseFailureDuringRestoreRollsBackEveryClearedTable() = runBlocking {
         val dao = database.debtDao()
         dao.savePrayer(PrayerDebtEntity("FAJR", 30, 8, 1_000L))
@@ -413,7 +442,7 @@ class EncryptedBackupRestoreValidationTest {
             },
             contentProvider = provider
         )
-        val day = LocalDate.parse("2026-11-26")
+        val day = LocalDate.parse("2026-01-01")
         val loaded = repository.loadFor(day, forceRefresh = true)
         assertEquals(footnotes, loaded.verse?.translationFootnotes)
 
@@ -427,5 +456,71 @@ class EncryptedBackupRestoreValidationTest {
         } finally {
             password.fill('\u0000')
         }
+    }
+
+    @Test fun dailyVerseCachePrunesToSevenCalendarDaysEvenOnCacheHit() = runBlocking {
+        val today = LocalDate.parse("2026-11-26")
+        val dao = database.debtDao()
+        (0L..7L).forEach { daysAgo ->
+            val date = today.minusDays(daysAgo)
+            dao.saveDailyVerse(
+                DailyVerseEntity(
+                    dayKey = date.toString(),
+                    surah = 1,
+                    ayah = 1,
+                    globalNumber = 1,
+                    arabicText = "بِسْمِ اللَّهِ",
+                    persianTranslation = "ترجمه",
+                    translationSource = "QuranEnc · Rowwad",
+                    translationVersion = "1.1.3",
+                    tafsirText = null,
+                    tafsirSource = null,
+                    recitationUrl = null,
+                    reciterName = null,
+                    fetchedAt = date.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+                )
+            )
+        }
+        val repository = QuranContentRepository(
+            dao,
+            object : ArabicQuranTextProvider {
+                override fun getAyah(surah: Int, ayah: Int): String? = "بِسْمِ اللَّهِ"
+            }
+        )
+
+        val result = repository.loadFor(today)
+        val retained = dao.getAllDailyVerses()
+
+        assertTrue(result.fromCache)
+        assertEquals(today.toString(), result.verse?.dayKey)
+        assertEquals(7, retained.size)
+        assertTrue(retained.all { !LocalDate.parse(it.dayKey).isBefore(today.minusDays(6)) })
+    }
+
+    @Test fun quranEncMissingVerseCoordinatesAreRejectedInsteadOfGuessed() = runBlocking {
+        val provider = object : QuranEncContentProvider {
+            override fun listTranslations() = JSONArray().put(
+                JSONObject().put("key", "persian_ih").put("language_iso_code", "fa")
+                    .put("version", "1.1.3").put("title", "Persian Translation - Rowwad Translation Center")
+            )
+            override fun listTafsirs() = JSONArray()
+            override fun translationForSurah(key: String, surah: Int) = JSONArray().put(
+                JSONObject().put("id", "1").put("translation", "ترجمه بدون مختصات آیه").put("footnotes", "")
+            )
+            override fun tafsirForAyah(key: String, surah: Int, ayah: Int) = JSONArray()
+        }
+        val repository = QuranContentRepository(
+            database.debtDao(),
+            object : ArabicQuranTextProvider {
+                override fun getAyah(surah: Int, ayah: Int): String? = "بِسْمِ اللَّهِ"
+            },
+            contentProvider = provider
+        )
+
+        val result = repository.loadFor(LocalDate.parse("2026-01-01"), forceRefresh = true)
+
+        assertNull(result.verse)
+        assertTrue(result.message?.contains("شماره سوره") == true)
+        assertNull(database.debtDao().getLatestDailyVerse())
     }
 }

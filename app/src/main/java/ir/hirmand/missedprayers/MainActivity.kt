@@ -24,11 +24,13 @@ import ir.hirmand.missedprayers.ui.DebtViewModel
 import ir.hirmand.missedprayers.ui.HomeScreen
 import ir.hirmand.missedprayers.ui.DatabaseUnavailableScreen
 import ir.hirmand.missedprayers.ui.DatabaseLoadingScreen
+import ir.hirmand.missedprayers.ui.BackupRecoveryViewModel
 import ir.hirmand.missedprayers.ui.theme.MissedWorshipTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    private val backupRecoveryViewModel: BackupRecoveryViewModel by viewModels()
     private val viewModel: DebtViewModel by viewModels {
         val repository = DebtRepository(AppDatabase.get(applicationContext))
         val quranRepository = QuranContentRepository(AppDatabase.get(applicationContext).debtDao(), TanzilAssetTextProvider(assets))
@@ -63,6 +65,7 @@ class MainActivity : ComponentActivity() {
                         !databaseChecked -> DatabaseLoadingScreen()
                         databaseFailure != null -> DatabaseUnavailableScreen(
                             keyMaterialMissing = keyMaterialMissing,
+                            recoveryViewModel = backupRecoveryViewModel,
                             onRestoreBackup = { bytes, password ->
                                 AppDatabase.restoreFromBackup(applicationContext, bytes, password)
                             },

@@ -63,6 +63,16 @@ jobs:
           disable-animations: true
           script: ./gradlew --no-daemon connectedDebugAndroidTest
 
+      - name: Upload instrumentation test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: missed-prayers-instrumentation-results
+          path: |
+            app/build/reports/androidTests/connected/debug
+            app/build/outputs/androidTest-results/connected
+          if-no-files-found: warn
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:

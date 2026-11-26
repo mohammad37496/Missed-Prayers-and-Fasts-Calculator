@@ -24,6 +24,14 @@ The app displays the source and version supplied by the official API. Text is no
 rewritten or paraphrased. Version values above are the versions verified when
 the integration was implemented; the app reads current metadata at runtime.
 
+The published conditions on the official page explicitly describe republication
+of translations of Quranic meanings. They do not separately spell out the terms
+for the Persian As-Saadi tafsir edition. The current integration identifies the
+official QuranEnc source and API version, but this distinction remains a release
+gate: obtain source-specific confirmation for republication of this tafsir before
+public distribution. Do not treat the translation conditions alone as definitive
+proof of tafsir republication rights.
+
 The official translation API returns a `footnotes` field alongside each verse.
 The app stores this field verbatim, displays it separately beneath the translation,
 and includes it in encrypted backups. Older cache rows and backup schema versions
