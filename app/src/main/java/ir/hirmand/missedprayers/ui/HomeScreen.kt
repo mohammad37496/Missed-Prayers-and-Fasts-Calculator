@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -154,6 +155,8 @@ fun HomeScreen(viewModel: DebtViewModel) {
                 savedFasting = fasting,
                 onSavePrayer = { type, total, done -> viewModel.savePrayer(type, total, done) { error = it } },
                 onSaveFasting = { total, done -> viewModel.saveFasting(total, done) { error = it } },
+                onAdjustPrayerTotal = { type, total -> viewModel.adjustPrayerTotal(type, total) { error = it } },
+                onAdjustFastingTotal = { total -> viewModel.adjustFastingTotal(total) { error = it } },
                 onContinue = { showSetup = false },
                 error = error
             )
@@ -268,6 +271,8 @@ private fun SetupScreen(
     savedFasting: FastingDebtEntity?,
     onSavePrayer: (PrayerType, Int, Int) -> Unit,
     onSaveFasting: (Int, Int) -> Unit,
+    onAdjustPrayerTotal: (PrayerType, Int) -> Unit,
+    onAdjustFastingTotal: (Int) -> Unit,
     onContinue: () -> Unit,
     error: String?
 ) {
@@ -277,6 +282,7 @@ private fun SetupScreen(
     var prayerDone by remember(selectedPrayer, savedPrayers) { mutableStateOf(selectedDebt?.completed?.toString() ?: "0") }
     var fastTotal by remember(savedFasting) { mutableStateOf(savedFasting?.total?.toString() ?: "0") }
     var fastDone by remember(savedFasting) { mutableStateOf(savedFasting?.completed?.toString() ?: "0") }
+    var pendingAdjustment by remember { mutableStateOf<Pair<String, Int>?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("آغاز مسیر جبران", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -293,12 +299,42 @@ private fun SetupScreen(
         item { NumberField("تعداد کل نماز ${selectedPrayer.title}", prayerTotal) { prayerTotal = it } }
         item { NumberField("تعداد انجام‌شده قبلی", prayerDone) { prayerDone = it } }
         item { Button(onClick = { onSavePrayer(selectedPrayer, prayerTotal.toIntOrNull() ?: -1, prayerDone.toIntOrNull() ?: -1) }, modifier = Modifier.fillMaxWidth()) { Text("ذخیره این نماز") } }
+        if (selectedDebt != null) item {
+            OutlinedButton(
+                onClick = { prayerTotal.toIntOrNull()?.let { pendingAdjustment = "PRAYER:${selectedPrayer.name}" to it } },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("اصلاح صریح سقف بدهی نماز با ثبت در تاریخچه") }
+        }
         item { Text("روزه‌های قضا", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
         item { NumberField("تعداد کل روزه", fastTotal) { fastTotal = it } }
         item { NumberField("تعداد روزه انجام‌شده قبلی", fastDone) { fastDone = it } }
         item { Button(onClick = { onSaveFasting(fastTotal.toIntOrNull() ?: -1, fastDone.toIntOrNull() ?: -1) }, modifier = Modifier.fillMaxWidth()) { Text("ذخیره روزه‌ها") } }
+        if (savedFasting != null) item {
+            OutlinedButton(
+                onClick = { fastTotal.toIntOrNull()?.let { pendingAdjustment = "FASTING" to it } },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("اصلاح صریح سقف بدهی روزه با ثبت در تاریخچه") }
+        }
         if (error != null) item { Text(error, color = MaterialTheme.colorScheme.error) }
         item { OutlinedButton(onClick = onContinue, modifier = Modifier.fillMaxWidth()) { Text("ورود به داشبورد") } }
+    }
+    pendingAdjustment?.let { (target, newTotal) ->
+        val isPrayer = target.startsWith("PRAYER:")
+        val currentTotal = if (isPrayer) selectedDebt?.total else savedFasting?.total
+        AlertDialog(
+            onDismissRequest = { pendingAdjustment = null },
+            title = { Text("تأیید اصلاح سقف بدهی") },
+            text = {
+                Text("سقف فعلی: ${currentTotal ?: "نامشخص"} · سقف جدید: $newTotal. این اصلاح در تاریخچه ثبت می‌شود و فقط در صورت سازگاری با شمارنده‌های انجام‌شده قابل بازگردانی است.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (isPrayer) onAdjustPrayerTotal(selectedPrayer, newTotal) else onAdjustFastingTotal(newTotal)
+                    pendingAdjustment = null
+                }) { Text("تأیید اصلاح") }
+            },
+            dismissButton = { OutlinedButton(onClick = { pendingAdjustment = null }) { Text("انصراف") } }
+        )
     }
 }
 
@@ -361,7 +397,7 @@ private fun Dashboard(
                 Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
-                            Text("$title · ${if (record.kind.endsWith("ADJUSTMENT")) "اصلاح شمارنده" else "${record.amount} مورد"}", fontWeight = FontWeight.Medium)
+                            Text("$title · ${when { record.kind.endsWith("_TOTAL_ADJUSTMENT") -> "اصلاح سقف بدهی"; record.kind.endsWith("ADJUSTMENT") -> "اصلاح شمارنده انجام‌شده"; else -> "${record.amount} مورد" }}", fontWeight = FontWeight.Medium)
                             if (record.kind.endsWith("ADJUSTMENT")) Text("${record.beforeCompleted} ← ${record.afterCompleted}", style = MaterialTheme.typography.labelSmall)
                             val localDateTime = java.time.Instant.ofEpochMilli(record.createdAt).atZone(zone)
                             Text("${CalendarDates.displayPreferred(localDateTime.toLocalDate(), calendarPreference)} · ${localDateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}", style = MaterialTheme.typography.labelSmall)

@@ -142,6 +142,16 @@ class DebtViewModel(private val repository: DebtRepository, private val quranRep
             .onFailure { onError(it.message ?: "ذخیره اطلاعات انجام نشد") }
     }
 
+    fun adjustPrayerTotal(type: PrayerType, total: Int, onError: (String) -> Unit) = viewModelScope.launch {
+        runCatching { repository.adjustPrayerTotal(type, total) }
+            .onFailure { onError(it.message ?: "اصلاح سقف بدهی نماز انجام نشد") }
+    }
+
+    fun adjustFastingTotal(total: Int, onError: (String) -> Unit) = viewModelScope.launch {
+        runCatching { repository.adjustFastingTotal(total) }
+            .onFailure { onError(it.message ?: "اصلاح سقف بدهی روزه انجام نشد") }
+    }
+
     fun recordPrayer(type: PrayerType, amount: Int = 1, onError: (String) -> Unit = {}) {
         val key = "prayer:${type.name}"
         if (!recordingGuard.begin(key, SystemClock.elapsedRealtime())) return

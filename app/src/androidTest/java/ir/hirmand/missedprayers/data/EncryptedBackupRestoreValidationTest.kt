@@ -55,6 +55,55 @@ class EncryptedBackupRestoreValidationTest {
         assertEquals(5, dao.getFasting()?.completed)
     }
 
+    @Test fun manualInitializationPreservesTotalsAndExplicitTotalAdjustmentsAreAuditedUndoableAndBackedUp() = runBlocking {
+        val dao = database.debtDao()
+        val repository = DebtRepository(database)
+        val now = System.currentTimeMillis()
+        dao.savePrayer(PrayerDebtEntity("FAJR", total = 100, completed = 20, updatedAt = now))
+        dao.saveFasting(FastingDebtEntity(total = 60, completed = 10, updatedAt = now))
+
+        repository.initializePrayer(ir.hirmand.missedprayers.domain.PrayerType.FAJR, total = 30, completed = 20)
+        repository.initializeFasting(total = 25, completed = 10)
+        assertEquals(100, dao.getPrayer("FAJR")?.total)
+        assertEquals(60, dao.getFasting()?.total)
+
+        repository.adjustPrayerTotal(ir.hirmand.missedprayers.domain.PrayerType.FAJR, 80)
+        repository.adjustFastingTotal(40)
+        assertEquals(80, dao.getPrayer("FAJR")?.total)
+        assertEquals(40, dao.getFasting()?.total)
+        assertTrue(runCatching { repository.adjustPrayerTotal(ir.hirmand.missedprayers.domain.PrayerType.FAJR, 19) }.isFailure)
+        assertTrue(runCatching { repository.adjustFastingTotal(9) }.isFailure)
+
+        val records = dao.getAllRecords().associateBy { it.kind }
+        val prayerAdjustment = records["PRAYER_TOTAL_ADJUSTMENT"]
+        val fastingAdjustment = records["FASTING_TOTAL_ADJUSTMENT"]
+        assertEquals(100, prayerAdjustment?.beforeCompleted)
+        assertEquals(80, prayerAdjustment?.afterCompleted)
+        assertEquals(20, prayerAdjustment?.amount)
+        assertEquals(60, fastingAdjustment?.beforeCompleted)
+        assertEquals(40, fastingAdjustment?.afterCompleted)
+        assertEquals(20, fastingAdjustment?.amount)
+
+        val password = "debt-total-adjustment-backup".toCharArray()
+        try {
+            val backup = EncryptedBackupManager(database).createBackup(password)
+            dao.savePrayer(dao.getPrayer("FAJR")!!.copy(total = 90))
+            dao.saveFasting(dao.getFasting()!!.copy(total = 50))
+            EncryptedBackupManager(database).restoreBackup(backup, password.copyOf())
+
+            val restoredRecords = dao.getAllRecords()
+            assertEquals(2, restoredRecords.size)
+            repository.undoRecord(restoredRecords.first { it.kind == "PRAYER_TOTAL_ADJUSTMENT" }.id)
+            repository.undoRecord(restoredRecords.first { it.kind == "FASTING_TOTAL_ADJUSTMENT" }.id)
+            assertEquals(100, dao.getPrayer("FAJR")?.total)
+            assertEquals(60, dao.getFasting()?.total)
+            assertEquals(20, dao.getPrayer("FAJR")?.completed)
+            assertEquals(10, dao.getFasting()?.completed)
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+
     @Test fun profileRejectsFutureObligationStartAndEndDates() = runBlocking {
         val repository = DebtRepository(database)
         val today = LocalDate.now(java.time.ZoneId.of("UTC"))

@@ -85,7 +85,7 @@ class DebtRepository(private val database: AppDatabase) {
             if (existing == null) {
                 dao.savePrayer(PrayerDebtEntity(type.name, total, completed, now))
             } else {
-                val safeTotal = maxOf(total, completed, existing.completed)
+                val safeTotal = maxOf(total, completed, existing.completed, existing.total)
                 if (completed != existing.completed) {
                     dao.setPrayerCompleted(type.name, completed, now)
                     dao.insertRecord(DebtRecordEntity(kind = PRAYER_ADJUSTMENT_KIND, reference = type.name, amount = kotlin.math.abs(completed - existing.completed), createdAt = now, beforeCompleted = existing.completed, afterCompleted = completed))
@@ -103,13 +103,57 @@ class DebtRepository(private val database: AppDatabase) {
             if (existing == null) {
                 dao.saveFasting(FastingDebtEntity(total = total, completed = completed, updatedAt = now))
             } else {
-                val safeTotal = maxOf(total, completed, existing.completed)
+                val safeTotal = maxOf(total, completed, existing.completed, existing.total)
                 if (completed != existing.completed) {
                     dao.setFastingCompleted(completed, now)
                     dao.insertRecord(DebtRecordEntity(kind = FASTING_ADJUSTMENT_KIND, reference = FASTING_KIND, amount = kotlin.math.abs(completed - existing.completed), createdAt = now, beforeCompleted = existing.completed, afterCompleted = completed))
                 }
                 dao.saveFasting(FastingDebtEntity(total = safeTotal, completed = completed, updatedAt = now))
             }
+        }
+    }
+
+    /** Explicitly changes the prayer debt ceiling and records the before/after totals for safe undo. */
+    suspend fun adjustPrayerTotal(type: PrayerType, total: Int) {
+        require(total >= 0)
+        database.withTransaction {
+            val existing = dao.getPrayer(type.name) ?: error("ابتدا بدهی این نماز را ثبت کنید")
+            require(total >= existing.completed) { "سقف بدهی نمی‌تواند از تعداد انجام‌شده کمتر باشد" }
+            if (total == existing.total) return@withTransaction
+            val now = System.currentTimeMillis()
+            dao.savePrayer(existing.copy(total = total, updatedAt = now))
+            dao.insertRecord(
+                DebtRecordEntity(
+                    kind = PRAYER_TOTAL_ADJUSTMENT_KIND,
+                    reference = type.name,
+                    amount = kotlin.math.abs(total - existing.total),
+                    createdAt = now,
+                    beforeCompleted = existing.total,
+                    afterCompleted = total
+                )
+            )
+        }
+    }
+
+    /** Explicitly changes the fasting debt ceiling and records the before/after totals for safe undo. */
+    suspend fun adjustFastingTotal(total: Int) {
+        require(total >= 0)
+        database.withTransaction {
+            val existing = dao.getFasting() ?: error("ابتدا بدهی روزه را ثبت کنید")
+            require(total >= existing.completed) { "سقف بدهی نمی‌تواند از تعداد انجام‌شده کمتر باشد" }
+            if (total == existing.total) return@withTransaction
+            val now = System.currentTimeMillis()
+            dao.saveFasting(existing.copy(total = total, updatedAt = now))
+            dao.insertRecord(
+                DebtRecordEntity(
+                    kind = FASTING_TOTAL_ADJUSTMENT_KIND,
+                    reference = FASTING_KIND,
+                    amount = kotlin.math.abs(total - existing.total),
+                    createdAt = now,
+                    beforeCompleted = existing.total,
+                    afterCompleted = total
+                )
+            )
         }
     }
 
@@ -170,6 +214,12 @@ class DebtRepository(private val database: AppDatabase) {
                     }
                     dao.setPrayerCompleted(record.reference, record.beforeCompleted, now)
                 }
+                PRAYER_TOTAL_ADJUSTMENT_KIND -> {
+                    val debt = dao.getPrayer(record.reference) ?: error("رکورد نماز دیگر وجود ندارد")
+                    check(debt.total == record.afterCompleted) { "سقف بدهی پس از این اصلاح تغییر کرده؛ بازگردانی مستقیم ممکن نیست." }
+                    check(record.beforeCompleted >= debt.completed) { "بازگردانی سقف قبلی، تعداد انجام‌شده را از سقف بدهی بیشتر می‌کند." }
+                    dao.savePrayer(debt.copy(total = record.beforeCompleted, updatedAt = now))
+                }
                 FASTING_KIND, FASTING_ADJUSTMENT_KIND -> {
                     val debt = dao.getFasting() ?: error("رکورد روزه دیگر وجود ندارد")
                     val current = debt.completed
@@ -178,6 +228,12 @@ class DebtRepository(private val database: AppDatabase) {
                         "مقدار پیشین این ثبت از سقف فعلی بدهی بیشتر است؛ بازگردانی مستقیم ممکن نیست."
                     }
                     dao.setFastingCompleted(record.beforeCompleted, now)
+                }
+                FASTING_TOTAL_ADJUSTMENT_KIND -> {
+                    val debt = dao.getFasting() ?: error("رکورد روزه دیگر وجود ندارد")
+                    check(debt.total == record.afterCompleted) { "سقف بدهی پس از این اصلاح تغییر کرده؛ بازگردانی مستقیم ممکن نیست." }
+                    check(record.beforeCompleted >= debt.completed) { "بازگردانی سقف قبلی، تعداد انجام‌شده را از سقف بدهی بیشتر می‌کند." }
+                    dao.saveFasting(debt.copy(total = record.beforeCompleted, updatedAt = now))
                 }
                 else -> error("نوع رکورد برای بازگردانی شناخته‌شده نیست")
             }
@@ -190,5 +246,7 @@ class DebtRepository(private val database: AppDatabase) {
         const val FASTING_KIND = "FASTING"
         const val PRAYER_ADJUSTMENT_KIND = "PRAYER_ADJUSTMENT"
         const val FASTING_ADJUSTMENT_KIND = "FASTING_ADJUSTMENT"
+        const val PRAYER_TOTAL_ADJUSTMENT_KIND = "PRAYER_TOTAL_ADJUSTMENT"
+        const val FASTING_TOTAL_ADJUSTMENT_KIND = "FASTING_TOTAL_ADJUSTMENT"
     }
 }

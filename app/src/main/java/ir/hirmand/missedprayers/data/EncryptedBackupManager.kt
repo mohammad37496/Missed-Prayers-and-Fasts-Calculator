@@ -58,7 +58,7 @@ class EncryptedBackupManager(
         }
         val records = root.getJSONArray("records").toEntities { item ->
             val kind = item.getString("kind"); val reference = item.getString("reference"); val amount = item.getInt("amount")
-            require(amount > 0 && ((kind in setOf("PRAYER", "PRAYER_ADJUSTMENT") && reference in setOf("FAJR", "DHUHR", "ASR", "MAGHRIB", "ISHA")) || (kind in setOf("FASTING", "FASTING_ADJUSTMENT") && reference == "FASTING")))
+            require(amount > 0 && ((kind in setOf("PRAYER", "PRAYER_ADJUSTMENT", "PRAYER_TOTAL_ADJUSTMENT") && reference in setOf("FAJR", "DHUHR", "ASR", "MAGHRIB", "ISHA")) || (kind in setOf("FASTING", "FASTING_ADJUSTMENT", "FASTING_TOTAL_ADJUSTMENT") && reference == "FASTING")))
             val id = item.getLong("id")
             require(id > 0) { "شناسه رکورد تاریخچه معتبر نیست" }
             val before = if (backupVersion >= 5) item.getInt("beforeCompleted") else 0
@@ -66,8 +66,12 @@ class EncryptedBackupManager(
             require(before >= 0 && after >= 0)
             val debtTotal = if (reference == "FASTING") fasting?.total else prayers.firstOrNull { it.prayerType == reference }?.total
             require(debtTotal != null) { "رکورد تاریخچه به شمارنده بدهی موجودی اشاره نمی‌کند" }
-            require(before in 0..debtTotal && after in 0..debtTotal) {
-                "مقادیر پیش و پس از ثبت تاریخچه از سقف بدهی بیشتر هستند"
+            if (kind.endsWith("_TOTAL_ADJUSTMENT")) {
+                require(before >= 0 && after >= 0) { "مقادیر اصلاح سقف بدهی معتبر نیستند" }
+            } else {
+                require(before in 0..debtTotal && after in 0..debtTotal) {
+                    "مقادیر پیش و پس از ثبت تاریخچه از سقف بدهی بیشتر هستند"
+                }
             }
             if (backupVersion >= 5) {
                 require(if (kind.endsWith("ADJUSTMENT")) kotlin.math.abs(after.toLong() - before.toLong()) == amount.toLong() else after.toLong() - before.toLong() == amount.toLong())
