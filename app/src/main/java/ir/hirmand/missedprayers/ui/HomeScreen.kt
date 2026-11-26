@@ -27,13 +27,16 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
@@ -58,13 +61,20 @@ import ir.hirmand.missedprayers.domain.PrayerType
 @Composable
 fun HomeScreen(viewModel: DebtViewModel) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val profile by viewModel.profile.collectAsState()
-    var pendingReminderSettings by remember { mutableStateOf<ir.hirmand.missedprayers.data.PlannerSettingsEntity?>(null) }
-    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        pendingReminderSettings?.let { settings ->
-            if (granted) ir.hirmand.missedprayers.notifications.ReminderScheduler.schedule(context, settings, profile?.timezoneId ?: ZoneId.systemDefault().id)
-            pendingReminderSettings = null
+    fun hasNotificationPermission(): Boolean = Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    var notificationPermissionGranted by remember { mutableStateOf(hasNotificationPermission()) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) notificationPermissionGranted = hasNotificationPermission()
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        notificationPermissionGranted = granted
     }
     var pendingBackup by remember { mutableStateOf<ByteArray?>(null) }
     var pendingImportPassword by remember { mutableStateOf<CharArray?>(null) }
@@ -119,10 +129,13 @@ fun HomeScreen(viewModel: DebtViewModel) {
     var error by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember(profile) { mutableStateOf(if (profile == null) "profile" else "dashboard") }
 
-    LaunchedEffect(plannerSettings, profile?.timezoneId) {
+    LaunchedEffect(plannerSettings, profile?.timezoneId, notificationPermissionGranted) {
         plannerSettings?.let { settings ->
-            val allowed = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            if (!settings.reminderEnabled || allowed) ir.hirmand.missedprayers.notifications.ReminderScheduler.schedule(context, settings, profile?.timezoneId ?: ZoneId.systemDefault().id)
+            if (settings.reminderEnabled && notificationPermissionGranted) {
+                ir.hirmand.missedprayers.notifications.ReminderScheduler.schedule(context, settings, profile?.timezoneId ?: ZoneId.systemDefault().id)
+            } else {
+                ir.hirmand.missedprayers.notifications.ReminderScheduler.cancel(context)
+            }
         }
     }
 
@@ -154,13 +167,12 @@ fun HomeScreen(viewModel: DebtViewModel) {
                     androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (selectedTab) {
                         "calendar" -> CalendarScreen(profile)
-                        "planner" -> PlannerScreen(plannerSettings, prayers.map { it.prayerType to (it.total - it.completed).coerceAtLeast(0) }, ((fasting?.total ?: 0) - (fasting?.completed ?: 0)).coerceAtLeast(0), profile?.timezoneId) { settings ->
+                        "planner" -> PlannerScreen(plannerSettings, prayers.map { it.prayerType to (it.total - it.completed).coerceAtLeast(0) }, ((fasting?.total ?: 0) - (fasting?.completed ?: 0)).coerceAtLeast(0), profile?.timezoneId, notificationPermissionGranted, onOpenNotificationSettings = {
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName))
+                        }) { settings ->
                             viewModel.savePlannerSettings(settings) { error = it }
                             if (settings.reminderEnabled && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                                pendingReminderSettings = settings
                                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                ir.hirmand.missedprayers.notifications.ReminderScheduler.schedule(context, settings, profile?.timezoneId ?: ZoneId.systemDefault().id)
                             }
                         }
                         "reports" -> ReportsScreen(prayers, fasting, viewModel.allRecords.collectAsState().value)

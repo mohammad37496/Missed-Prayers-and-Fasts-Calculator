@@ -183,7 +183,15 @@ fun ProfileScreen(
 }
 
 @Composable
-fun PlannerScreen(settings: PlannerSettingsEntity?, prayers: List<Pair<String, Int>>, fastingRemaining: Int, timezoneId: String?, onSave: (PlannerSettingsEntity) -> Unit) {
+fun PlannerScreen(
+    settings: PlannerSettingsEntity?,
+    prayers: List<Pair<String, Int>>,
+    fastingRemaining: Int,
+    timezoneId: String?,
+    notificationPermissionGranted: Boolean,
+    onOpenNotificationSettings: () -> Unit,
+    onSave: (PlannerSettingsEntity) -> Unit
+) {
     var prayerTarget by remember(settings) { mutableStateOf((settings?.dailyPrayerTarget ?: 5).toString()) }
     var fastingTarget by remember(settings) { mutableStateOf((settings?.dailyFastingTarget ?: 1).toString()) }
     var mask by remember(settings) { mutableIntStateOf(settings?.activeWeekdaysMask ?: 127) }
@@ -211,6 +219,18 @@ fun PlannerScreen(settings: PlannerSettingsEntity?, prayers: List<Pair<String, I
         item { if (projection != null) Text("با $remaining نماز باقی‌مانده، حدود ${projection.estimatedActiveDays()} روز فعال و پایان تقریبی ${CalendarDates.display(projection.estimatedCompletionDate(CalendarDates.today(timezoneId ?: ZoneId.systemDefault().id)))} لازم است.") }
         item { Text("روزه باقی‌مانده: $fastingRemaining روز؛ با هدف ${fastingTarget.toIntOrNull() ?: 0} در روز فعال، زمان تقریبی ${estimatedActiveDays(fastingRemaining.toLong(), (fastingTarget.toIntOrNull() ?: 1).coerceAtLeast(1))} روز فعال است.") }
         item { Text("یادآورها با WorkManager زمان‌بندی می‌شوند و ممکن است به‌دلیل حالت ذخیره باتری یا محدودیت سیستم‌عامل با تأخیر اجرا شوند.", style = MaterialTheme.typography.bodySmall) }
+        item {
+            if (reminders && notificationPermissionGranted) {
+                Text("مجوز اعلان فعال است؛ یادآور طبق برنامه زمان‌بندی می‌شود.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+            } else if (reminders) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("مجوز اعلان غیرفعال است؛ تا فعال‌کردن مجوز در تنظیمات دستگاه، اعلانی نمایش داده نمی‌شود.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = onOpenNotificationSettings, modifier = Modifier.fillMaxWidth()) { Text("تنظیم مجوز اعلان") }
+                }
+            } else {
+                Text("یادآورها خاموش هستند.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = reminders, onCheckedChange = { reminders = it })
